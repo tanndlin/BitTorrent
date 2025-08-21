@@ -9,7 +9,7 @@ const torrentViewer = (props: Props) => {
     return (
         <tr>
             <td>{torrent.name}</td>
-            <td>{torrent.progress}%</td>
+            <td>{torrent.tracker}</td>
         </tr>
     );
 };

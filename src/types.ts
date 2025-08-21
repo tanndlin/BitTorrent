@@ -1,4 +1,5 @@
 export type Torrent = {
     name: string;
-    progress: number;
+    tracker: string;
+    hashes: Uint8Array[];
 };

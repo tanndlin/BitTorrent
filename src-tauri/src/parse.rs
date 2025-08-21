@@ -1,4 +1,4 @@
-use core::hash;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 static DICTIONARY_START: u8 = b'd';
@@ -6,6 +6,13 @@ static DICTIONARY_END: u8 = b'e';
 static INTEGER_START: u8 = b'i';
 static INTEGER_END: u8 = b'e';
 static COLON: u8 = b':';
+
+#[derive(Serialize, Deserialize)]
+pub struct Torrent {
+    pub name: String,
+    pub tracker: String,
+    pub hashes: Vec<[u8; 20]>,
+}
 
 pub fn parse_metainfo(content: &Vec<u8>) -> HashMap<String, Value> {
     let mut index: usize = 0;
