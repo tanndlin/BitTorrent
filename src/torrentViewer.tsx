@@ -1,3 +1,4 @@
+import prettyBytes from 'pretty-bytes';
 import { Torrent } from './types';
 
 type Props = {
@@ -9,15 +10,17 @@ const torrentViewer = (props: Props) => {
     return (
         <tr>
             <td>{torrent.info.name}</td>
-            <td>{torrent.trackers[0]}</td>
+            <td>{torrent.trackers.length}</td>
             <td>
                 {torrent.info.length
                     ? `${torrent.info.length} bytes`
                     : torrent.info.files
-                    ? `${torrent.info.files.reduce(
-                          (acc, file) => acc + (file.length || 0),
-                          0
-                      )} bytes`
+                    ? `${prettyBytes(
+                          torrent.info.files.reduce(
+                              (acc, file) => acc + (file.length || 0),
+                              0
+                          )
+                      )}`
                     : 'N/A'}
             </td>
         </tr>
