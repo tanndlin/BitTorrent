@@ -5,13 +5,13 @@ import TorrentViewer from './torrentViewer';
 import { Torrent } from './types';
 
 function App() {
-    const [greetMsg, setGreetMsg] = useState('');
-    const [name, setName] = useState('');
+    // const [greetMsg, setGreetMsg] = useState('');
+    // const [name, setName] = useState('');
 
-    async function greet() {
-        // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-        setGreetMsg(await invoke('greet', { name }));
-    }
+    // async function greet() {
+    //     // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+    //     setGreetMsg(await invoke('greet', { name }));
+    // }
 
     const [torrents, setTorrents] = useState<Torrent[]>([]);
 
@@ -37,6 +37,7 @@ function App() {
                     <tr>
                         <th>Name</th>
                         <th>Tracker</th>
+                        <th>Size</th>
                     </tr>
                 </thead>
                 <tbody>

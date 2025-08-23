@@ -5,28 +5,132 @@ static DICTIONARY_START: u8 = b'd';
 static DICTIONARY_END: u8 = b'e';
 static INTEGER_START: u8 = b'i';
 static INTEGER_END: u8 = b'e';
+static LIST_START: u8 = b'l';
+static LIST_END: u8 = b'e';
 static COLON: u8 = b':';
 
 #[derive(Serialize, Deserialize)]
 pub struct Torrent {
+    pub trackers: Vec<String>,
+    pub info: Info,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Info {
     pub name: String,
-    pub tracker: String,
-    pub hashes: Vec<[u8; 20]>,
+    pub piece_length: i32,
+    pub pieces: Vec<[u8; 20]>,
+    pub length: Option<i32>,
+    pub files: Option<Vec<File>>,
 }
 
-pub fn parse_metainfo(content: &Vec<u8>) -> HashMap<String, Value> {
-    let mut index: usize = 0;
-    parse_dictionary(content, &mut index)
+#[derive(Serialize, Deserialize)]
+struct File {
+    pub length: i32,
+    pub path: Vec<String>,
 }
 
+pub fn parse_metainfo(content: &Vec<u8>) -> Torrent {
+    let parsed = parse_dictionary(content, &mut 0);
+    let dict = match parsed {
+        Value::Dict(map) => map,
+        _ => panic!("metainfo is not a dictionary"),
+    };
+    print_map(&dict);
+
+    let trackers = if let Some(Value::List(announce_list)) = dict.get("announce-list") {
+        let mut trackers = Vec::new();
+        for tier in announce_list {
+            if let Value::List(tier_list) = tier {
+                for url in tier_list {
+                    if let Value::Str(s) = url {
+                        trackers.push(s.clone());
+                    }
+                }
+            }
+        }
+        trackers
+    } else if let Some(Value::Str(announce)) = dict.get("announce") {
+        vec![announce.clone()]
+    } else {
+        vec![]
+    };
+
+    Torrent {
+        trackers,
+        info: match &dict["info"] {
+            Value::Dict(info_map) => {
+                let name = match &info_map["name"] {
+                    Value::Str(s) => s.clone(),
+                    _ => panic!("info.name is not a string"),
+                };
+                let piece_length = match &info_map["piece length"] {
+                    Value::Number(n) => *n,
+                    _ => panic!("info.piece length is not a number"),
+                };
+                let pieces = match &info_map["pieces"] {
+                    Value::Hashes(h) => h.clone(),
+                    _ => panic!("info.pieces is not a list of hashes"),
+                };
+                let length = match info_map.get("length") {
+                    Some(Value::Number(n)) => Some(*n),
+                    Some(_) => panic!("info.length is not a number"),
+                    None => None,
+                };
+                let files = match info_map.get("files") {
+                    Some(Value::List(l)) => {
+                        let mut file_list = Vec::new();
+                        for file_value in l {
+                            match file_value {
+                                Value::Dict(file_map) => {
+                                    let length = match &file_map["length"] {
+                                        Value::Number(n) => *n,
+                                        _ => panic!("file.length is not a number"),
+                                    };
+                                    let path = match &file_map["path"] {
+                                        Value::List(p) => p
+                                            .iter()
+                                            .map(|v| match v {
+                                                Value::Str(s) => s.clone(),
+                                                _ => panic!("file.path element is not a string"),
+                                            })
+                                            .collect(),
+                                        _ => panic!("file.path is not a list"),
+                                    };
+                                    file_list.push(File { length, path });
+                                }
+                                _ => panic!("file entry is not a dictionary"),
+                            }
+                        }
+                        Some(file_list)
+                    }
+                    Some(_) => panic!("info.files is not a list"),
+                    None => None,
+                };
+
+                Info {
+                    name,
+                    piece_length,
+                    pieces,
+                    length,
+                    files,
+                }
+            }
+            _ => panic!("info is not a dictionary"),
+        },
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Value {
-    Number(usize),
+    Number(i32),
     Str(String),
     Dict(HashMap<String, Value>),
+    List(Vec<Value>),
     Hashes(Vec<[u8; 20]>),
 }
 
-fn parse_dictionary(content: &Vec<u8>, index: &mut usize) -> HashMap<String, Value> {
+fn parse_dictionary(content: &Vec<u8>, index: &mut usize) -> Value {
     assert!(content[*index] == DICTIONARY_START);
 
     *index += 1; // move past 'd'
@@ -39,63 +143,131 @@ fn parse_dictionary(content: &Vec<u8>, index: &mut usize) -> HashMap<String, Val
             continue;
         }
 
-        let value = if content[*index] == INTEGER_START {
-            *index += 1;
-            let ret = Value::Number(get_next_number(content, index));
-            *index += 1;
-            ret
-        } else if content[*index] == DICTIONARY_START {
-            Value::Dict(parse_dictionary(content, index))
-        } else {
-            Value::Str(get_string(content, index))
-        };
-
+        let value = parse_next(content, index);
         map.insert(key, value);
     }
 
     assert!(content[*index] == DICTIONARY_END);
     *index += 1; // move past 'e'
 
-    map
+    Value::Dict(map)
 }
 
-fn parse_hashes(content: &Vec<u8>, index: &mut usize) -> Vec<[u8; 20]> {
-    let mut size = get_next_number(content, index);
+fn parse_next(content: &Vec<u8>, index: &mut usize) -> Value {
+    if content[*index] == INTEGER_START {
+        parse_number(content, index)
+    } else if content[*index] == DICTIONARY_START {
+        parse_dictionary(content, index)
+    } else if content[*index] == LIST_START {
+        parse_list(content, index)
+    } else {
+        Value::Str(get_string(content, index))
+    }
+}
+
+fn parse_number(content: &Vec<u8>, index: &mut usize) -> Value {
     *index += 1;
+    let number = get_next_number(content, index);
+    assert!(content[*index] == INTEGER_END);
+    *index += 1; // move past 'e'
+    Value::Number(number)
+}
+
+fn parse_list(content: &Vec<u8>, index: &mut usize) -> Value {
+    *index += 1; // move past 'l'
+    let mut list = Vec::new();
+    while content[*index] != LIST_END {
+        list.push(parse_next(content, index));
+    }
+    assert!(content[*index] == LIST_END);
+    *index += 1; // move past 'e'
+    Value::List(list)
+}
+
+// Fix the parse_hashes function
+fn parse_hashes(content: &Vec<u8>, index: &mut usize) -> Vec<[u8; 20]> {
+    let size = get_next_number(content, index);
+
+    // Check for colon separator
+    assert!(content[*index] == COLON);
+    *index += 1; // move past ':'
 
     let mut hashes = Vec::new();
-    while size > 0 {
+    let mut remaining = size;
+
+    while remaining >= 20 {
         let hash_slice = &content[*index..*index + 20];
         let mut hash = [0u8; 20];
         hash.copy_from_slice(hash_slice);
         hashes.push(hash);
         *index += 20;
-        size -= 20;
+        remaining -= 20;
     }
 
     hashes
 }
 
 fn get_string(content: &Vec<u8>, index: &mut usize) -> String {
-    let size = get_next_number(content, index);
+    let size = get_next_number(content, index) as usize; // size cannot be negative here
+
+    assert!(content[*index] == COLON);
     *index += 1;
     let ret = String::from_utf8(content[*index..size + *index].to_vec()).unwrap();
-    *index += size;
+    *index += size as usize;
 
     ret
 }
 
-fn get_next_number(content: &Vec<u8>, index: &mut usize) -> usize {
-    let mut size: usize = 0;
+fn get_next_number(content: &Vec<u8>, index: &mut usize) -> i32 {
+    let mut n: i32 = 0;
+    let mut negative: i32 = 1;
     loop {
         let char = content[*index] as char;
+        if n == 0 && char == '-' {
+            negative = -1;
+            *index += 1;
+            continue;
+        }
+
         if !char.is_ascii_digit() {
             break;
         }
-        size *= 10;
-        size += char.to_digit(10).unwrap() as usize;
+        n *= 10;
+        n += char.to_digit(10).unwrap() as i32;
         *index += 1;
     }
 
-    size
+    n * negative
+}
+
+pub fn print_map(map: &HashMap<String, Value>) {
+    for (key, value) in map {
+        print!("{}: ", key);
+        match value {
+            Value::Str(s) => println!("{s}"),
+            Value::Number(n) => println!("{n}"),
+            Value::Dict(d) => print_map(d),
+            Value::Hashes(h) => print_hashes(h),
+            Value::List(l) => print_list(l),
+        };
+    }
+}
+
+fn print_list(list: &Vec<Value>) {
+    for value in list {
+        match value {
+            Value::Str(s) => print!("{s} "),
+            Value::Number(n) => print!("{n} "),
+            Value::Dict(d) => print_map(d),
+            Value::Hashes(h) => print_hashes(h),
+            Value::List(l) => print_list(l),
+        }
+    }
+    println!();
+}
+
+fn print_hashes(hashes: &Vec<[u8; 20]>) {
+    for hash in hashes {
+        print!("{:?} ", hash);
+    }
 }
