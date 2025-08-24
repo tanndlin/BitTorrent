@@ -31,6 +31,8 @@ const TorrentsContainer = () => {
                         <ResizeableTableHeader title="Name" />
                         <ResizeableTableHeader title="Trackers" />
                         <ResizeableTableHeader title="Size" />
+                        <ResizeableTableHeader title="Actions" />
+                        <ResizeableTableHeader title="Tracker Statuses" />
                     </tr>
                 </thead>
                 <tbody>

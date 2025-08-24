@@ -1,4 +1,6 @@
+import { invoke } from '@tauri-apps/api/core';
 import prettyBytes from 'pretty-bytes';
+import { useState } from 'react';
 import { Torrent } from './types';
 
 type Props = {
@@ -7,10 +9,32 @@ type Props = {
 
 const torrentViewer = (props: Props) => {
     const { torrent } = props;
+    const [trackerStatuses, setTrackerStatuses] = useState<boolean[]>([]);
+
+    const checkTracker = () => {
+        console.log('Checking trackers...');
+        const results = torrent.trackers.map((tracker) =>
+            invoke('check_tracker', { url: tracker })
+        );
+
+        Promise.all(results).then((statuses) => {
+            setTrackerStatuses(statuses as boolean[]);
+            console.log(statuses);
+        });
+    };
+
     return (
         <tr>
             <td>{torrent.info.name}</td>
-            <td>{torrent.trackers.length}</td>
+            <td>
+                <select>
+                    {torrent.trackers.map((tracker, index) => (
+                        <option key={index} value={tracker}>
+                            {tracker}
+                        </option>
+                    ))}
+                </select>
+            </td>
             <td>
                 {torrent.info.length
                     ? `${torrent.info.length} bytes`
@@ -22,6 +46,16 @@ const torrentViewer = (props: Props) => {
                           )
                       )}`
                     : 'N/A'}
+            </td>
+            <td>
+                <button onClick={checkTracker}>Check Trackers</button>
+            </td>
+            <td>
+                {trackerStatuses.length > 0
+                    ? trackerStatuses.map((status, index) => (
+                          <div key={index}>{status ? 'good' : 'bad'}</div>
+                      ))
+                    : 'No statuses yet'}
             </td>
         </tr>
     );
