@@ -3,28 +3,10 @@ use std::collections::HashMap;
 use crate::bencoding::{
     decode::Value,
     util::{
-        Download, Torrent, COLON, DICTIONARY_END, DICTIONARY_START, INTEGER_END, INTEGER_START,
-        LIST_END, LIST_START,
+        Torrent, COLON, DICTIONARY_END, DICTIONARY_START, INTEGER_END, INTEGER_START, LIST_END,
+        LIST_START,
     },
 };
-
-pub fn encode_tracker_get_request(download: &Download, hash: [u8; 20]) -> Vec<u8> {
-    let mut ret = HashMap::<String, Value>::new();
-    ret.insert("info_hash".to_string(), Value::Hash(hash));
-    ret.insert("peer_id".to_string(), Value::Str(download.peer_id.clone()));
-    if let Some(ip) = &download.ip {
-        ret.insert("ip".to_string(), Value::Str(ip.clone()));
-    }
-    ret.insert("port".to_string(), Value::Number(download.port));
-    ret.insert("uploaded".to_string(), Value::Number(download.uploaded));
-    ret.insert("downloaded".to_string(), Value::Number(download.downloaded));
-    ret.insert("left".to_string(), Value::Number(download.left));
-    if let Some(event) = &download.event {
-        ret.insert("ip".to_string(), Value::Str(event.to_string()));
-    }
-
-    encode_value(Value::Dict(ret))
-}
 
 #[allow(dead_code)]
 fn encode_torrent(torrent: &Torrent) -> Vec<u8> {

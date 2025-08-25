@@ -4,10 +4,10 @@
 use std::net::{ToSocketAddrs, UdpSocket};
 
 mod bencoding;
-use crate::bencoding::{
-    decode,
-    encode::encode_tracker_get_request,
-    util::{Download, Torrent},
+mod connection;
+use crate::{
+    bencoding::{decode, util::Torrent},
+    connection::{Action, AnnounceRequest, AnnounceResponse, Event, FromByte, ToByte},
 };
 
 fn check_tracker(url: &str) -> Result<bool, String> {
@@ -59,43 +59,6 @@ fn main() {
 }
 
 fn test(torrent: &Torrent, tracker: &String) {
-    // let peer_id = "-TR2940-6wfG2wk6wWLc".to_string();
-    // let download = Download {
-    //     torrent,
-    //     peer_id,
-    //     port: 6969,
-    //     downloaded: 0,
-    //     uploaded: 0,
-    //     left: torrent.info.files.as_ref().unwrap()[0].length,
-    //     ip: None,
-    //     event: None,
-    // };
-
-    // let bytes = encode_tracker_get_request(&download, torrent.info.pieces[0]);
-    // println!("Sending {} bytes to {tracker}", bytes.len());
-
-    // let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind socket");
-    // let target_url: String = tracker.trim_start_matches("udp://").to_string();
-    // let remote_addr = target_url
-    //     .to_socket_addrs()
-    //     .expect("Failed to resolve address")
-    //     .next()
-    //     .expect("Could not resolve address");
-
-    // socket
-    //     .send_to(&bytes, &remote_addr)
-    //     .expect("Failed to send data");
-    // println!("UDP datagram sent to {}", remote_addr);
-    // let mut buf = [0; 1024];
-    // socket
-    //     .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-    //     .expect("Failed to set read timeout");
-
-    // // Receive repoonse
-    // let res = socket.recv_from(&mut buf).expect("Failed to receive data");
-    // let (amt, src) = res;
-    // println!("Received {} bytes from {}: {:?}", amt, src, &buf[..amt]);
-
     // send a connect request
     let mut buf = [0; 16];
     buf[0..8].copy_from_slice(&0x41727101980u64.to_be_bytes());
@@ -120,7 +83,67 @@ fn test(torrent: &Torrent, tracker: &String) {
         .set_read_timeout(Some(std::time::Duration::from_secs(5)))
         .expect("Failed to set read timeout");
     // Receive repoonse
-    let res = socket.recv_from(&mut buf).expect("Failed to receive data");
-    let (amt, src) = res;
+    let res = socket.recv_from(&mut buf);
+    if res.is_err() {
+        println!("No response received (timeout or error)");
+        return;
+    }
+
+    let (amt, src) = res.unwrap();
     println!("Received {} bytes from {}: {:?}", amt, src, &buf[..amt]);
+
+    let action = u32::from_be_bytes(buf[0..4].try_into().unwrap());
+    let transaction_id = u32::from_be_bytes(buf[4..8].try_into().unwrap());
+    let connection_id = u64::from_be_bytes(buf[8..16].try_into().unwrap());
+    println!(
+        "Action: {}, Transaction ID: {}, Connection ID: {}",
+        action, transaction_id, connection_id
+    );
+
+    // Send announce request
+    let peer_id_str = "-TR2940-6wfG2wk6wWLc";
+    let peer_id: [u8; 20] = {
+        let bytes = peer_id_str.as_bytes();
+        let mut arr = [0u8; 20];
+        arr[..bytes.len().min(20)].copy_from_slice(&bytes[..bytes.len().min(20)]);
+        arr
+    };
+
+    let announce_request = AnnounceRequest {
+        action: Action::ConnectRequest,
+        connection_id,
+        downloaded: 0,
+        transaction_id,
+        info_hash: torrent.info.pieces[0],
+        event: Event::None,
+        ip: None,
+        key: 0,
+        peer_id,
+        left: torrent.info.files.as_ref().unwrap()[0].length as u64,
+        uploaded: 0,
+        port: 6969,
+        num_want: -1,
+    };
+
+    let buf = announce_request.to_be_bytes();
+    println!("Announce request: {:?}", &buf);
+    socket
+        .send_to(&buf, &remote_addr)
+        .expect("Failed to send data");
+
+    let mut buf = [0; 1024];
+    socket
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .expect("Failed to set read timeout");
+    // Receive repoonse
+    let res = socket.recv_from(&mut buf);
+    if res.is_err() {
+        println!("No response received (timeout or error)");
+        return;
+    }
+
+    let (amt, src) = res.unwrap();
+    println!("Received {} bytes from {}: {:?}", amt, src, &buf[..amt]);
+    let announce_response = AnnounceResponse::from_be_bytes(&buf[..amt]);
+    dbg!(announce_response);
 }
