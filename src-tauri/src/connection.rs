@@ -44,14 +44,14 @@ impl ToByte for AnnounceRequest {
     fn to_be_bytes(&self) -> Vec<u8> {
         let mut buf = [0; 98];
         buf[0..8].copy_from_slice(&self.connection_id.to_be_bytes());
-        buf[8..12].copy_from_slice(&(self.action as u32).to_be_bytes()); // action
+        buf[8..12].copy_from_slice(&(self.action as u32).to_be_bytes());
         buf[12..16].copy_from_slice(&self.transaction_id.to_be_bytes());
-        buf[16..36].copy_from_slice(&self.info_hash); // info hash
-        buf[36..56].copy_from_slice(&self.peer_id); // peer id
+        buf[16..36].copy_from_slice(&self.info_hash);
+        buf[36..56].copy_from_slice(&self.peer_id);
         buf[56..64].copy_from_slice(&self.downloaded.to_be_bytes());
         buf[64..72].copy_from_slice(&self.left.to_be_bytes());
         buf[72..80].copy_from_slice(&self.uploaded.to_be_bytes());
-        buf[80..84].copy_from_slice(&(self.event as u32).to_be_bytes()); // event
+        buf[80..84].copy_from_slice(&(self.event as u32).to_be_bytes());
         if let Some(ip) = &self.ip {
             match ip {
                 IpAddr::V4(ipv4) => buf[84..88].copy_from_slice(&ipv4.octets()),

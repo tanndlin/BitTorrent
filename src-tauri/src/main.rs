@@ -66,7 +66,7 @@ fn test(torrent: &Torrent, tracker: &String) {
     buf[12..16].copy_from_slice(&69u32.to_be_bytes());
     println!("Connect request: {:?}", &buf);
 
-    let socket = UdpSocket::bind("0.0.0.0:6881").expect("Failed to bind socket");
+    let socket = UdpSocket::bind("0.0.0.0:6969").expect("Failed to bind socket");
     let target_url: String = tracker.trim_start_matches("udp://").to_string();
     let remote_addr = target_url
         .to_socket_addrs()
@@ -110,14 +110,14 @@ fn test(torrent: &Torrent, tracker: &String) {
     };
 
     let announce_request = AnnounceRequest {
-        action: Action::ConnectRequest,
+        action: Action::AnnounceRequest,
         connection_id,
         downloaded: 0,
         transaction_id,
         info_hash: torrent.info.pieces[0],
         event: Event::None,
         ip: None,
-        key: 0,
+        key: 69420,
         peer_id,
         left: torrent.info.files.as_ref().unwrap()[0].length as u64,
         uploaded: 0,
@@ -143,6 +143,8 @@ fn test(torrent: &Torrent, tracker: &String) {
     }
 
     let (amt, src) = res.unwrap();
+    let num_peers = (amt - 20) / 6;
+    println!("Received {amt} bytes, with {num_peers} peers");
     println!("Received {} bytes from {}: {:?}", amt, src, &buf[..amt]);
     let announce_response = AnnounceResponse::from_be_bytes(&buf[..amt]);
     dbg!(announce_response);

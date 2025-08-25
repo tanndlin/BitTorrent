@@ -9,7 +9,7 @@ pub fn parse_metainfo(content: &Vec<u8>) -> Torrent {
         Value::Dict(map) => map,
         _ => panic!("metainfo is not a dictionary"),
     };
-    print_map(&dict);
+    // print_map(&dict);
 
     let trackers = if let Some(Value::List(announce_list)) = dict.get("announce-list") {
         let mut trackers = Vec::new();
