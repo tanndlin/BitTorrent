@@ -12,6 +12,7 @@ pub static COLON: u8 = b':';
 pub struct Torrent {
     pub trackers: Vec<String>,
     pub info: Info,
+    pub info_hash: [u8; 20],
 }
 
 #[derive(Serialize, Deserialize)]

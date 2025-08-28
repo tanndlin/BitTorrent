@@ -114,16 +114,12 @@ fn test(torrent: &Torrent, tracker: &String) {
         torrent.info.files.as_ref().unwrap()[0].length as u64
     };
 
-    let mut hasher = Sha1::new();
-    let as_value = encode::info_to_value(&torrent.info);
-    hasher.update(encode::encode_value(as_value));
-
     let announce_request = AnnounceRequest {
         action: Action::AnnounceRequest,
         connection_id,
         downloaded: 0,
         transaction_id,
-        info_hash: hasher.finalize().into(),
+        info_hash: torrent.info_hash,
         event: Event::None,
         ip: None,
         key: 69420,

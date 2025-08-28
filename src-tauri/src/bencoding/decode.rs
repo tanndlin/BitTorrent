@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use sha1::{Digest, Sha1};
 use std::collections::HashMap;
 
 use crate::bencoding::util::{self, File, Info, Torrent};
@@ -31,6 +32,7 @@ pub fn parse_metainfo(content: &Vec<u8>) -> Torrent {
 
     Torrent {
         trackers,
+        info_hash: get_info_hash(content, 0),
         info: match &dict["info"] {
             Value::Dict(info_map) => {
                 let name = match &info_map["name"] {
@@ -247,4 +249,44 @@ fn print_hashes(hashes: &Vec<[u8; 20]>) {
     for hash in hashes {
         print!("{:?} ", hash);
     }
+}
+
+pub fn get_info_hash(content: &Vec<u8>, start: usize) -> [u8; 20] {
+    let mut index = start;
+
+    // Find the "info" dictionary
+    while index < content.len() {
+        if content[index] == util::DICTIONARY_START {
+            index += 1;
+            let key = get_string(content, &mut index);
+            if key == "info" {
+                // We found the "info" key, now hash the corresponding dictionary
+                let start = index - key.len() - 1; // include the length prefix and colon
+                let mut hasher = Sha1::new();
+                parse_dictionary(content, &mut index); // parse to move the index forward
+                let end = index; // end of the "info" dictionary
+
+                hasher.update(&content[start..end]);
+                return hasher.finalize().into();
+            } else {
+                // Skip this dictionary entry
+                return get_info_hash(content, index);
+            }
+        } else {
+            let next = parse_next(content, &mut index);
+            dbg!(&next);
+            if let Value::Str(value) = next {
+                if value == "info" {
+                    let start = index;
+                    let mut hasher = Sha1::new();
+                    parse_dictionary(content, &mut index); // parse to move the index forward
+                    let end = index; // end of the "info" dictionary
+                    hasher.update(&content[start..end]);
+                    return hasher.finalize().into();
+                }
+            }
+        }
+    }
+
+    panic!("'info' dictionary not found");
 }
