@@ -100,7 +100,7 @@ impl FromByte for AnnounceResponse {
         let seeders = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
         let peers: Vec<Peer> = bytes[20..]
             .chunks_exact(6)
-            .map(|chunk| Peer::from_be_bytes(chunk.into()))
+            .map(Peer::from_be_bytes)
             .collect();
 
         AnnounceResponse {
@@ -135,7 +135,7 @@ impl ToByte for ScrapeRequest {
     }
 }
 
-struct ScrapeSubresponse {
+pub struct ScrapeSubresponse {
     pub seeders: u32,
     pub completed: u32,
     pub leechers: u32,

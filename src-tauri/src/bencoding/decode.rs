@@ -106,7 +106,7 @@ pub enum Value {
     Hash([u8; 20]),
 }
 
-fn parse_dictionary(content: &Vec<u8>, index: &mut usize) -> Value {
+fn parse_dictionary(content: &[u8], index: &mut usize) -> Value {
     assert!(content[*index] == util::DICTIONARY_START);
 
     *index += 1; // move past 'd'
@@ -130,7 +130,7 @@ fn parse_dictionary(content: &Vec<u8>, index: &mut usize) -> Value {
     Value::Dict(map)
 }
 
-fn parse_next(content: &Vec<u8>, index: &mut usize) -> Value {
+fn parse_next(content: &[u8], index: &mut usize) -> Value {
     if content[*index] == util::INTEGER_START {
         parse_number(content, index)
     } else if content[*index] == util::DICTIONARY_START {
@@ -142,7 +142,7 @@ fn parse_next(content: &Vec<u8>, index: &mut usize) -> Value {
     }
 }
 
-fn parse_number(content: &Vec<u8>, index: &mut usize) -> Value {
+fn parse_number(content: &[u8], index: &mut usize) -> Value {
     *index += 1;
     let number = get_next_number(content, index);
     assert!(content[*index] == util::INTEGER_END);
@@ -150,7 +150,7 @@ fn parse_number(content: &Vec<u8>, index: &mut usize) -> Value {
     Value::Number(number)
 }
 
-fn parse_list(content: &Vec<u8>, index: &mut usize) -> Value {
+fn parse_list(content: &[u8], index: &mut usize) -> Value {
     *index += 1; // move past 'l'
     let mut list = Vec::new();
     while content[*index] != util::LIST_END {
@@ -162,7 +162,7 @@ fn parse_list(content: &Vec<u8>, index: &mut usize) -> Value {
 }
 
 // Fix the parse_hashes function
-fn parse_hashes(content: &Vec<u8>, index: &mut usize) -> Vec<[u8; 20]> {
+fn parse_hashes(content: &[u8], index: &mut usize) -> Vec<[u8; 20]> {
     let size = get_next_number(content, index);
 
     // Check for colon separator
@@ -184,7 +184,7 @@ fn parse_hashes(content: &Vec<u8>, index: &mut usize) -> Vec<[u8; 20]> {
     hashes
 }
 
-fn get_string(content: &Vec<u8>, index: &mut usize) -> String {
+fn get_string(content: &[u8], index: &mut usize) -> String {
     let size = get_next_number(content, index) as usize; // size cannot be negative here
 
     assert!(content[*index] == util::COLON);
@@ -195,7 +195,7 @@ fn get_string(content: &Vec<u8>, index: &mut usize) -> String {
     ret
 }
 
-fn get_next_number(content: &Vec<u8>, index: &mut usize) -> i64 {
+fn get_next_number(content: &[u8], index: &mut usize) -> i64 {
     let mut n: i64 = 0;
     let mut negative: i64 = 1;
     loop {
@@ -217,6 +217,7 @@ fn get_next_number(content: &Vec<u8>, index: &mut usize) -> i64 {
     n * negative
 }
 
+#[allow(dead_code)]
 pub fn print_map(map: &HashMap<String, Value>) {
     for (key, value) in map {
         print!("{}: ", key);

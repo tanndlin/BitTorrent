@@ -1,4 +1,3 @@
-use std::io;
 use std::net::{ToSocketAddrs, UdpSocket};
 
 use crate::bencoding::decode;
@@ -30,7 +29,7 @@ async fn check_tracker(url: &str) -> Result<bool, String> {
 
     // 5. Send the datagram.
     socket
-        .send_to(data, &remote_addr)
+        .send_to(data, remote_addr)
         .map_err(|e| format!("Failed to send data: {}", e))?;
 
     println!("UDP datagram sent to {}", remote_addr);

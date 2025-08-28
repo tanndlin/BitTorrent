@@ -1,15 +1,13 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use glob;
-use sha1::{Digest, Sha1};
-use std::net::{ToSocketAddrs, UdpSocket};
+use std::net::UdpSocket;
 use url::Url;
 
 mod bencoding;
 mod connection;
 use crate::{
-    bencoding::{decode, encode, util::Torrent},
+    bencoding::{decode, util::Torrent},
     connection::{Action, AnnounceRequest, AnnounceResponse, Event, FromByte, ToByte},
 };
 
@@ -52,7 +50,7 @@ fn main() {
     let parsed = decode::parse_metainfo(&content);
 
     for tracker in &parsed.trackers {
-        match check_tracker(&tracker.as_str()) {
+        match check_tracker(tracker.as_str()) {
             Ok(res) => {
                 if res {
                     test(&parsed, tracker);
@@ -63,7 +61,7 @@ fn main() {
     }
 }
 
-fn test(torrent: &Torrent, tracker: &String) {
+fn test(torrent: &Torrent, tracker: &str) {
     // send a connect request
     let mut buf = [0; 16];
     buf[0..8].copy_from_slice(&0x41727101980u64.to_be_bytes());
