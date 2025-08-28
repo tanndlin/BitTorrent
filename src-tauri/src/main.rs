@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use glob;
 use sha1::{Digest, Sha1};
 use std::net::{ToSocketAddrs, UdpSocket};
 use url::Url;
@@ -42,7 +43,12 @@ fn check_tracker(url: &str) -> Result<bool, String> {
 fn main() {
     // bittorrent_lib::run();
 
-    let content = std::fs::read("C:/Users/Tanner/Documents/torrents/Inglourious Basterds 2009 Inglorious Bastards DVDRip x264.torrent").expect("Failed to read file");
+    let path = glob::glob("*.torrent")
+        .expect("Failed to read glob pattern")
+        .next()
+        .expect("No .torrent files found")
+        .expect("Failed to read path");
+    let content = std::fs::read(path).expect("Failed to read file");
     let parsed = decode::parse_metainfo(&content);
 
     for tracker in &parsed.trackers {
