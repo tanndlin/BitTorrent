@@ -1,12 +1,14 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use sha1::{Digest, Sha1};
 use std::net::{ToSocketAddrs, UdpSocket};
+use url::Url;
 
 mod bencoding;
 mod connection;
 use crate::{
-    bencoding::{decode, util::Torrent},
+    bencoding::{decode, encode, util::Torrent},
     connection::{Action, AnnounceRequest, AnnounceResponse, Event, FromByte, ToByte},
 };
 
@@ -17,15 +19,12 @@ fn check_tracker(url: &str) -> Result<bool, String> {
         UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind socket: {}", e))?;
 
     // 2. Define the target URL (hostname and port).
-    let target_url: String = url.trim_start_matches("udp://").to_string(); // Replace with your target URL and port
-    println!("{target_url}");
+    let url = Url::parse(url).expect("Invalid URL");
 
     // 3. Resolve the target URL to a SocketAddr.
-    let remote_addr = target_url
-        .to_socket_addrs()
-        .map_err(|e| format!("Failed to resolve address: {}", e))?
-        .next()
-        .ok_or_else(|| "Could not resolve address".to_string())?;
+    let host = url.host_str().expect("No host in URL");
+    let port = url.port().unwrap_or(80);
+    let remote_addr = format!("{}:{}", host, port);
 
     // 4. Prepare the data to send.
     let data = b"Hello, UDP!";
@@ -67,12 +66,12 @@ fn test(torrent: &Torrent, tracker: &String) {
     println!("Connect request: {:?}", &buf);
 
     let socket = UdpSocket::bind("0.0.0.0:6969").expect("Failed to bind socket");
-    let target_url: String = tracker.trim_start_matches("udp://").to_string();
-    let remote_addr = target_url
-        .to_socket_addrs()
-        .expect("Failed to resolve address")
-        .next()
-        .expect("Could not resolve address");
+    let url = Url::parse(tracker).expect("Invalid URL");
+
+    // 3. Resolve the target URL to a SocketAddr.
+    let host = url.host_str().expect("No host in URL");
+    let port = url.port().unwrap_or(80);
+    let remote_addr = format!("{}:{}", host, port);
 
     socket
         .send_to(&buf, &remote_addr)
@@ -101,7 +100,7 @@ fn test(torrent: &Torrent, tracker: &String) {
     );
 
     // Send announce request
-    let peer_id_str = "-TR2940-6wfG2wk6wWLc";
+    let peer_id_str = "-TR6969-fuckmek6wWLc";
     let peer_id: [u8; 20] = {
         let bytes = peer_id_str.as_bytes();
         let mut arr = [0u8; 20];
@@ -109,17 +108,27 @@ fn test(torrent: &Torrent, tracker: &String) {
         arr
     };
 
+    let left = if let Some(length) = torrent.info.length {
+        length as u64
+    } else {
+        torrent.info.files.as_ref().unwrap()[0].length as u64
+    };
+
+    let mut hasher = Sha1::new();
+    let as_value = encode::info_to_value(&torrent.info);
+    hasher.update(encode::encode_value(as_value));
+
     let announce_request = AnnounceRequest {
         action: Action::AnnounceRequest,
         connection_id,
         downloaded: 0,
         transaction_id,
-        info_hash: torrent.info.pieces[0],
+        info_hash: hasher.finalize().into(),
         event: Event::None,
         ip: None,
         key: 69420,
         peer_id,
-        left: torrent.info.files.as_ref().unwrap()[0].length as u64,
+        left,
         uploaded: 0,
         port: 6969,
         num_want: -1,

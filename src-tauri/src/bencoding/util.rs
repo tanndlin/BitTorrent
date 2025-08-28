@@ -17,14 +17,14 @@ pub struct Torrent {
 #[derive(Serialize, Deserialize)]
 pub struct Info {
     pub name: String,
-    pub piece_length: i32,
+    pub piece_length: i64,
     pub pieces: Vec<[u8; 20]>,
-    pub length: Option<i32>,
+    pub length: Option<i64>,
     pub files: Option<Vec<File>>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct File {
-    pub length: i32,
+    pub length: i64,
     pub path: Vec<String>,
 }

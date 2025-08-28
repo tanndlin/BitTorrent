@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::bencoding::{
     decode::Value,
     util::{
-        Torrent, COLON, DICTIONARY_END, DICTIONARY_START, INTEGER_END, INTEGER_START, LIST_END,
-        LIST_START,
+        File, Info, Torrent, COLON, DICTIONARY_END, DICTIONARY_START, INTEGER_END, INTEGER_START,
+        LIST_END, LIST_START,
     },
 };
 
@@ -63,7 +63,7 @@ fn encode_torrent(torrent: &Torrent) -> Vec<u8> {
     encode_value(Value::Dict(ret))
 }
 
-fn encode_value(value: Value) -> Vec<u8> {
+pub fn encode_value(value: Value) -> Vec<u8> {
     match value {
         Value::Number(n) => encode_number(n),
         Value::Str(s) => encode_string(&s),
@@ -99,7 +99,7 @@ fn encode_list(l: Vec<Value>) -> Vec<u8> {
     ret
 }
 
-fn encode_number(number: i32) -> Vec<u8> {
+fn encode_number(number: i64) -> Vec<u8> {
     let mut ret = Vec::<u8>::new();
     ret.push(INTEGER_START);
     ret.extend_from_slice(number.to_string().as_bytes());
@@ -127,4 +127,46 @@ fn encode_hashes(hashes: Vec<[u8; 20]>) -> Vec<u8> {
     }
 
     ret
+}
+
+pub fn info_to_value(info: &Info) -> Value {
+    let mut map = HashMap::<String, Value>::new();
+
+    map.insert("name".to_owned(), Value::Str(info.name.clone()));
+    map.insert("piece_length".to_owned(), Value::Number(info.piece_length));
+    map.insert("pieces".to_owned(), Value::Hashes(info.pieces.clone()));
+    if let Some(length) = info.length {
+        map.insert("length".to_owned(), Value::Number(length));
+    } else {
+        map.insert(
+            "files".to_owned(),
+            Value::List(
+                info.files
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .map(file_to_value)
+                    .collect(),
+            ),
+        );
+    }
+
+    Value::Dict(map)
+}
+
+fn file_to_value(file: &File) -> Value {
+    let mut map = HashMap::<String, Value>::new();
+
+    map.insert("length".to_owned(), Value::Number(file.length));
+    map.insert(
+        "path".to_owned(),
+        Value::List(
+            file.path
+                .iter()
+                .map(|dir| Value::Str(dir.clone()))
+                .collect(),
+        ),
+    );
+
+    Value::Dict(map)
 }

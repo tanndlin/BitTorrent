@@ -96,7 +96,7 @@ pub fn parse_metainfo(content: &Vec<u8>) -> Torrent {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Value {
-    Number(i32),
+    Number(i64),
     Str(String),
     Dict(HashMap<String, Value>),
     List(Vec<Value>),
@@ -116,6 +116,7 @@ fn parse_dictionary(content: &Vec<u8>, index: &mut usize) -> Value {
             map.insert(key, Value::Hashes(parse_hashes(content, index)));
             continue;
         }
+        println!("key: {key}");
 
         let value = parse_next(content, index);
         map.insert(key, value);
@@ -192,9 +193,9 @@ fn get_string(content: &Vec<u8>, index: &mut usize) -> String {
     ret
 }
 
-fn get_next_number(content: &Vec<u8>, index: &mut usize) -> i32 {
-    let mut n: i32 = 0;
-    let mut negative: i32 = 1;
+fn get_next_number(content: &Vec<u8>, index: &mut usize) -> i64 {
+    let mut n: i64 = 0;
+    let mut negative: i64 = 1;
     loop {
         let char = content[*index] as char;
         if n == 0 && char == '-' {
@@ -207,7 +208,7 @@ fn get_next_number(content: &Vec<u8>, index: &mut usize) -> i32 {
             break;
         }
         n *= 10;
-        n += char.to_digit(10).unwrap() as i32;
+        n += char.to_digit(10).unwrap() as i64;
         *index += 1;
     }
 
