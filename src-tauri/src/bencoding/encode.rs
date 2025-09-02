@@ -71,6 +71,7 @@ pub fn encode_value(value: Value) -> Vec<u8> {
         Value::List(l) => encode_list(l),
         Value::Hashes(h) => encode_hashes(h),
         Value::Hash(h) => h.to_vec(),
+        Value::Peers(p) => p.concat(),
     }
 }
 

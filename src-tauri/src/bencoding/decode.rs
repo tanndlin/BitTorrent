@@ -30,9 +30,16 @@ pub fn parse_metainfo(content: &Vec<u8>) -> Torrent {
         vec![]
     };
 
+    let info_hash = get_info_hash(content, 0);
+    // Print as a hex string
+    println!(
+        "Info hash: {:02x?}",
+        info_hash.map(|b| format!("{:02x}", b)).join("")
+    );
+
     Torrent {
         trackers,
-        info_hash: get_info_hash(content, 0),
+        info_hash,
         info: match &dict["info"] {
             Value::Dict(info_map) => {
                 let name = match &info_map["name"] {
@@ -104,9 +111,10 @@ pub enum Value {
     List(Vec<Value>),
     Hashes(Vec<[u8; 20]>),
     Hash([u8; 20]),
+    Peers(Vec<[u8; 6]>),
 }
 
-fn parse_dictionary(content: &[u8], index: &mut usize) -> Value {
+pub fn parse_dictionary(content: &[u8], index: &mut usize) -> Value {
     assert!(content[*index] == util::DICTIONARY_START);
 
     *index += 1; // move past 'd'
@@ -114,11 +122,17 @@ fn parse_dictionary(content: &[u8], index: &mut usize) -> Value {
 
     while content[*index] != util::DICTIONARY_END {
         let key = get_string(content, index);
+        println!("key: {key}");
         if key == "pieces" {
             map.insert(key, Value::Hashes(parse_hashes(content, index)));
             continue;
         }
-        println!("key: {key}");
+
+        if key == "peers" {
+            println!("parsing peers");
+            map.insert(key, Value::Peers(parse_peers(content, index)));
+            continue;
+        }
 
         let value = parse_next(content, index);
         map.insert(key, value);
@@ -184,6 +198,23 @@ fn parse_hashes(content: &[u8], index: &mut usize) -> Vec<[u8; 20]> {
     hashes
 }
 
+fn parse_peers(content: &[u8], index: &mut usize) -> Vec<[u8; 6]> {
+    let size = get_next_number(content, index) as usize;
+    assert!(content[*index] == util::COLON);
+    *index += 1; // move past ':'
+    let mut peers = Vec::new();
+    let end = *index + size;
+    while *index + 6 <= end {
+        let peer_slice = &content[*index..*index + 6];
+        let mut peer = [0u8; 6];
+        peer.copy_from_slice(peer_slice);
+        peers.push(peer);
+        *index += 6;
+    }
+
+    peers
+}
+
 fn get_string(content: &[u8], index: &mut usize) -> String {
     let size = get_next_number(content, index) as usize; // size cannot be negative here
 
@@ -228,6 +259,7 @@ pub fn print_map(map: &HashMap<String, Value>) {
             Value::Hashes(h) => print_hashes(h),
             Value::List(l) => print_list(l),
             Value::Hash(h) => print!("{:?} ", h),
+            Value::Peers(p) => print!("{:?} ", p),
         };
     }
 }
@@ -241,6 +273,7 @@ fn print_list(list: &Vec<Value>) {
             Value::Hashes(h) => print_hashes(h),
             Value::List(l) => print_list(l),
             Value::Hash(h) => print!("{:?} ", h),
+            Value::Peers(p) => print!("{:?} ", p),
         }
     }
     println!();

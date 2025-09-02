@@ -1,4 +1,11 @@
-use std::net::{IpAddr, Ipv4Addr};
+use core::panic;
+use std::net::{IpAddr, Ipv4Addr, UdpSocket};
+
+use reqwest::Response;
+use url::Url;
+use urlencoding::decode;
+
+use crate::bencoding::decode::{parse_dictionary, Value};
 
 pub trait ToByte {
     fn to_be_bytes(&self) -> Vec<u8>;
@@ -6,6 +13,14 @@ pub trait ToByte {
 
 pub trait FromByte {
     fn from_be_bytes(bytes: &[u8]) -> Self;
+}
+
+pub trait ToUrl {
+    fn to_url_params(&self) -> String;
+}
+
+pub trait HTTPResponse {
+    fn from_http_response(response: &[u8]) -> Self;
 }
 
 #[derive(Copy, Clone)]
@@ -18,10 +33,177 @@ pub enum Action {
 
 #[derive(Copy, Clone)]
 pub enum Event {
-    None = 0,
+    Empty = 0,
     Completed = 1,
     Started = 2,
     Stopped = 3,
+}
+
+impl Event {
+    fn to_string(&self) -> &str {
+        match self {
+            Event::Empty => "empty",
+            Event::Completed => "completed",
+            Event::Started => "started",
+            Event::Stopped => "stopped",
+        }
+    }
+}
+
+pub struct TrackerRequest {
+    pub info_hash: [u8; 20],
+    pub peer_id: [u8; 20],
+    pub port: u16,
+    pub uploaded: u64,
+    pub downloaded: u64,
+    pub left: u64,
+    pub compact: u8,
+    pub no_peer_id: bool,
+    pub event: Event,
+    pub ip: Option<IpAddr>,
+    pub num_want: Option<i32>,
+    pub key: Option<u32>,
+    pub tracker_id: Option<String>,
+}
+
+impl ToUrl for TrackerRequest {
+    fn to_url_params(&self) -> String {
+        let info_hash_encoded = self
+            .info_hash
+            .iter()
+            .map(|b| format!("%{:02x}", b))
+            .collect::<String>();
+
+        let peer_id_encoded = self
+            .peer_id
+            .iter()
+            .map(|b| format!("%{:02x}", b))
+            .collect::<String>();
+
+        format!(
+            "?info_hash={}&peer_id={}&port={}&uploaded={}&downloaded={}&left={}&compact={}&no_peer_id={}&event={}&ip={}&num_want={}&key={}&tracker_id={}",
+            info_hash_encoded,
+            peer_id_encoded,
+            self.port,
+            self.uploaded,
+            self.downloaded,
+            self.left,
+            self.compact,
+            self.no_peer_id as u8,
+            self.event.to_string(),
+            self.ip.map_or("".to_string(), |ip| ip.to_string()),
+            self.num_want.map_or(-1, |n| n),
+            self.key.map_or(0, |k| k),
+            self.tracker_id.as_deref().unwrap_or(""),
+        )
+    }
+}
+
+#[derive(Debug)]
+pub struct TrackerResponse {
+    pub failure: Option<TrackerResponseError>,
+    pub success: Option<TrackerResponseGood>,
+}
+
+#[derive(Debug)]
+pub struct TrackerResponseError {
+    pub failure_reason: String,
+}
+
+#[derive(Debug)]
+pub struct TrackerResponseGood {
+    pub warning_message: Option<String>,
+    pub interval: u32,
+    pub min_interval: Option<u32>,
+    pub tracker_id: Option<String>,
+    pub complete: u32,
+    pub incomplete: u32,
+    pub peers: Vec<Peer>,
+}
+
+impl HTTPResponse for TrackerResponse {
+    fn from_http_response(response: &[u8]) -> Self {
+        let map = match parse_dictionary(response, &mut 0) {
+            Value::Dict(d) => d,
+            _ => panic!("Expected a dictionary at the top level"),
+        };
+        dbg!(&map);
+
+        if map.contains_key("failure reason") {
+            let reason = if let Value::Str(s) = &map["failure reason"] {
+                s.clone()
+            } else {
+                "".to_string()
+            };
+            TrackerResponse {
+                failure: Some(TrackerResponseError {
+                    failure_reason: reason,
+                }),
+                success: None,
+            }
+        } else {
+            let warning_message = if let Some(Value::Str(s)) = map.get("warning message") {
+                Some(s.clone())
+            } else {
+                None
+            };
+
+            let interval = if let Value::Number(n) = &map["interval"] {
+                *n as u32
+            } else {
+                0
+            };
+
+            let min_interval = if let Some(Value::Number(n)) = map.get("min interval") {
+                Some(*n as u32)
+            } else {
+                None
+            };
+
+            // let tracker_id = if let Some(Value::Str(s)) = map.get("tracker id") {
+            //     s.clone()
+            // } else {
+            //     panic!("No tracker id in response");
+            // };
+
+            let tracker_id = if let Some(Value::Str(s)) = map.get("tracker id") {
+                Some(s.clone())
+            } else {
+                None
+            };
+
+            let complete = if let Some(Value::Number(n)) = map.get("complete") {
+                *n as u32
+            } else {
+                panic!("No complete in response");
+            };
+
+            let incomplete = if let Some(Value::Number(n)) = map.get("incomplete") {
+                *n as u32
+            } else {
+                panic!("No incomplete in response");
+            };
+
+            let peers = if let Value::Peers(s) = &map["peers"] {
+                s.iter().map(|x| Peer::from_be_bytes(x)).collect()
+            } else {
+                vec![]
+            };
+
+            TrackerResponse {
+                failure: None,
+                success: Some(TrackerResponseGood {
+                    warning_message,
+                    interval,
+                    min_interval,
+                    tracker_id,
+                    complete,
+                    incomplete,
+                    peers,
+                }),
+            }
+        }
+    }
 }
 
 pub struct AnnounceRequest {
@@ -67,7 +249,7 @@ impl ToByte for AnnounceRequest {
 }
 
 #[derive(Debug)]
-struct Peer {
+pub struct Peer {
     pub ip: IpAddr,
     pub port: u16,
 }
@@ -175,4 +357,39 @@ impl FromByte for ScrapeResponse {
             sub_response,
         }
     }
+}
+
+pub fn check_tracker(url: &str) -> Result<bool, String> {
+    if url.starts_with("udp://") {
+        check_udp_tracker(url)
+    } else if url.starts_with("http://") || url.starts_with("https://") {
+        Ok(true)
+    } else {
+        Err("Unsupported tracker protocol".to_string())
+    }
+}
+
+fn check_udp_tracker(url: &str) -> Result<bool, String> {
+    let socket =
+        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind socket: {}", e))?;
+
+    // 2. Define the target URL (hostname and port).
+    let url = Url::parse(url).expect("Invalid URL");
+
+    // 3. Resolve the target URL to a SocketAddr.
+    let host = url.host_str().expect("No host in URL");
+    let port = url.port().unwrap_or(80);
+    let remote_addr = format!("{}:{}", host, port);
+
+    // 4. Prepare the data to send.
+    let data = b"Hello, UDP!";
+
+    // 5. Send the datagram.
+    socket
+        .send_to(data, &remote_addr)
+        .map_err(|e| format!("Failed to send data: {}", e))?;
+
+    println!("UDP datagram sent to {}", remote_addr);
+
+    Ok(true)
 }

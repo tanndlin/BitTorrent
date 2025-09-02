@@ -8,40 +8,16 @@ mod bencoding;
 mod connection;
 use crate::{
     bencoding::{decode, util::Torrent},
-    connection::{Action, AnnounceRequest, AnnounceResponse, Event, FromByte, ToByte},
+    connection::{
+        check_tracker, Action, AnnounceRequest, AnnounceResponse, Event, FromByte, HTTPResponse,
+        ToByte, ToUrl, TrackerRequest, TrackerResponse,
+    },
 };
-
-fn check_tracker(url: &str) -> Result<bool, String> {
-    // 1. Bind the UdpSocket to a local address.
-    //    "0.0.0.0:0" allows the OS to choose an available port.
-    let socket =
-        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind socket: {}", e))?;
-
-    // 2. Define the target URL (hostname and port).
-    let url = Url::parse(url).expect("Invalid URL");
-
-    // 3. Resolve the target URL to a SocketAddr.
-    let host = url.host_str().expect("No host in URL");
-    let port = url.port().unwrap_or(80);
-    let remote_addr = format!("{}:{}", host, port);
-
-    // 4. Prepare the data to send.
-    let data = b"Hello, UDP!";
-
-    // 5. Send the datagram.
-    socket
-        .send_to(data, &remote_addr)
-        .map_err(|e| format!("Failed to send data: {}", e))?;
-
-    println!("UDP datagram sent to {}", remote_addr);
-
-    Ok(true)
-}
 
 fn main() {
     // bittorrent_lib::run();
 
-    let path = glob::glob("*.torrent")
+    let path = glob::glob("**/*.torrent")
         .expect("Failed to read glob pattern")
         .next()
         .expect("No .torrent files found")
@@ -49,24 +25,94 @@ fn main() {
     let content = std::fs::read(path).expect("Failed to read file");
     let parsed = decode::parse_metainfo(&content);
 
-    for tracker in &parsed.trackers {
-        match check_tracker(tracker.as_str()) {
-            Ok(res) => {
-                if res {
-                    test(&parsed, tracker);
-                }
-            }
-            Err(e) => println!("Error: {e}"),
-        }
+    // for tracker in &parsed.trackers {
+    //     match check_tracker(tracker.as_str()) {
+    //         Ok(res) => {
+    //             if res {
+    //                 if tracker.starts_with("udp://") {
+    //                     // test_udp(&parsed, tracker);
+    //                 } else if tracker.starts_with("http://") || tracker.starts_with("https://") {
+    //                     test_http(&parsed, tracker);
+    //                     break;
+    //                 }
+    //             }
+    //         }
+    //         Err(e) => println!("Error: {e}"),
+    //     }
+    // }
+
+    let tracker_request = &parsed
+        .trackers
+        .iter()
+        .find(|t| t.starts_with("http"))
+        .unwrap();
+    let response = get_peers_http(&parsed, tracker_request).unwrap();
+    println!("Tracker Response: {:?}", response);
+
+    if let Some(err) = response.failure {
+        println!("Tracker failure reason: {:?}", err);
+        return;
     }
+
+    let response = response.success.expect("No success response from tracker");
+    println!("Interval: {}", response.interval);
+    println!("Leechers: {}", response.incomplete);
+    println!("Seeders: {}", response.complete);
+    println!("Peers: {:?}", response.peers);
 }
 
-fn test(torrent: &Torrent, tracker: &str) {
+fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, String> {
+    println!("Testing HTTP tracker: {}", tracker);
+
+    let left = if let Some(length) = torrent.info.length {
+        length as u64
+    } else {
+        torrent.info.files.as_ref().unwrap()[0].length as u64
+    };
+
+    // send a connect request
+    let connection_request = TrackerRequest {
+        info_hash: torrent.info_hash,
+        peer_id: *b"-TR2940-fuckmek6wWLc",
+        downloaded: 0,
+        left,
+        uploaded: 0,
+        event: Event::Started,
+        ip: None,
+        key: None,
+        num_want: None,
+        port: 6969,
+        compact: 1,
+        no_peer_id: false,
+        tracker_id: None,
+    };
+
+    let url = format!("{}{}", tracker, connection_request.to_url_params());
+    println!("Request URL: {}", url);
+    let response = reqwest::blocking::get(&url).expect("Failed to send request");
+    let status = response.status();
+    println!("Response Status: {}", status);
+
+    let bytes = response.bytes().expect("Failed to read bytes");
+    let text = String::from_utf8_lossy(&bytes);
+    println!("Response Body: {:?}", text);
+
+    if !status.is_success() {
+        return Err("Failed to get a successful response from the tracker".to_string());
+    }
+
+    let tracker_response = TrackerResponse::from_http_response(bytes.as_ref());
+    dbg!(&tracker_response);
+
+    Ok(tracker_response)
+}
+
+fn get_peers_udp(torrent: &Torrent, tracker: &str) {
     // send a connect request
     let mut buf = [0; 16];
     buf[0..8].copy_from_slice(&0x41727101980u64.to_be_bytes());
     buf[8..12].copy_from_slice(&0u32.to_be_bytes());
-    buf[12..16].copy_from_slice(&69u32.to_be_bytes());
+    buf[12..16].copy_from_slice(&rand::random::<u32>().to_be_bytes());
     println!("Connect request: {:?}", &buf);
 
     let socket = UdpSocket::bind("0.0.0.0:6969").expect("Failed to bind socket");
@@ -104,7 +150,7 @@ fn test(torrent: &Torrent, tracker: &str) {
     );
 
     // Send announce request
-    let peer_id_str = "-TR6969-fuckmek6wWLc";
+    let peer_id_str = "-TR2940-fuckmek6wWLc";
     let peer_id: [u8; 20] = {
         let bytes = peer_id_str.as_bytes();
         let mut arr = [0u8; 20];
@@ -124,7 +170,7 @@ fn test(torrent: &Torrent, tracker: &str) {
         downloaded: 0,
         transaction_id,
         info_hash: torrent.info_hash,
-        event: Event::None,
+        event: Event::Empty,
         ip: None,
         key: 69420,
         peer_id,

@@ -5,6 +5,7 @@ description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
 
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
@@ -25,3 +26,6 @@ serde_json = "1"
 url = "2.5.7"
 sha1 = "0.10.6"
 glob = "0.3.3"
+rand = "0.9.2"
+reqwest = { version = "0.12.23", features = ["blocking"] }
+urlencoding = "2.1.3"
