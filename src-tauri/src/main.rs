@@ -1,17 +1,23 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::net::UdpSocket;
+use std::{
+    io::{Read, Write},
+    net::{TcpStream, UdpSocket},
+};
+use tauri::utils::config::parse;
 use url::Url;
 
 mod bencoding;
 mod connection;
+mod peer;
 use crate::{
     bencoding::{decode, util::Torrent},
     connection::{
         check_tracker, Action, AnnounceRequest, AnnounceResponse, Event, FromByte, HTTPResponse,
         ToByte, ToUrl, TrackerRequest, TrackerResponse,
     },
+    peer::{connect_to_peer, PeerHandshake},
 };
 
 fn main() {
@@ -59,6 +65,15 @@ fn main() {
     println!("Leechers: {}", response.incomplete);
     println!("Seeders: {}", response.complete);
     println!("Peers: {:?}", response.peers);
+
+    if response.peers.is_empty() {
+        println!("No peers available from tracker");
+        return;
+    }
+
+    let peer = &response.peers[0];
+    println!("First peer IP: {}, Port: {}", peer.ip, peer.port);
+    connect_to_peer(peer, parsed.info_hash);
 }
 
 fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, String> {
