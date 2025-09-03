@@ -1,5 +1,4 @@
-use serde::de;
-use sha1::digest::typenum::bit;
+use sha1::{Digest, Sha1};
 
 use crate::{
     bencoding::util::Torrent,
@@ -153,6 +152,25 @@ pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) {
         return;
     }
 
+    let piece = get_piece_from_peer(&mut stream, torrent, bitfield[0]);
+    match piece {
+        Ok(data) => {
+            println!("Successfully downloaded piece: {} bytes", data.len());
+        }
+        Err(e) => {
+            println!("Failed to download piece: {}", e);
+        }
+    }
+
+    // Close stream
+    drop(stream);
+}
+
+fn get_piece_from_peer(
+    stream: &mut TcpStream,
+    torrent: &Torrent,
+    piece_index: u32,
+) -> Result<Vec<u8>, String> {
     let interested_message = PeerMessage::create_interested();
     let interested_bytes = interested_message.to_be_bytes();
     println!("Sending interested message: {:?}", interested_bytes);
@@ -160,11 +178,16 @@ pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) {
         .write_all(&interested_bytes)
         .expect("Failed to send interested message");
 
-    let piece_index = bitfield[0];
-    let piece_length = torrent.info.piece_length;
-    let piece_buffer = vec![0; piece_length as usize];
+    let piece_length = torrent.info.piece_length as u32;
+    let mut piece_buffer = vec![0; piece_length as usize];
+    let mut start = 0;
     loop {
-        let request_message = PeerMessage::create_request(piece_index, 0, 16384);
+        let length = if piece_length - start < 16384 {
+            piece_length - start
+        } else {
+            16384
+        };
+        let request_message = PeerMessage::create_request(piece_index, start, length);
         let request_bytes = request_message.to_be_bytes();
         println!(
             "Sending request for piece index {}: {:?}",
@@ -186,12 +209,49 @@ pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) {
             piece_index
         );
 
-        let messages = handle_messages(&buf[..bytes_read], &mut is_choked, &mut bitfield);
-        println!("Is choked: {}, Bitfield: {:?}", is_choked, bitfield);
+        let messages = handle_messages(&buf[..bytes_read], &mut false, &mut vec![]);
+
+        let mut piece_received = false;
+        for message in &messages {
+            if let PeerMessageID::Piece = message.id {
+                let index = u32::from_be_bytes(message.payload[0..4].try_into().unwrap());
+                if index != piece_index {
+                    println!(
+                        "Received piece index {} but requested {}",
+                        index, piece_index
+                    );
+                    continue;
+                }
+
+                let begin = u32::from_be_bytes(message.payload[4..8].try_into().unwrap());
+                let block = &message.payload[8..];
+                piece_buffer[begin as usize..begin as usize + block.len()].copy_from_slice(block);
+                println!("Received piece index {} from peer", piece_index);
+                piece_received = true;
+            }
+        }
+
+        if !piece_received {
+            println!("Did not receive piece, retrying...");
+        } else {
+            start += 16384;
+            if start >= piece_length {
+                println!("Completed downloading piece index {}", piece_index);
+                break;
+            }
+        }
     }
 
-    // Close stream
-    drop(stream);
+    let mut hasher = Sha1::new();
+    hasher.update(&piece_buffer);
+    let piece_hash: [u8; 20] = hasher.finalize().into();
+    let expected_hash = &torrent.info.pieces[piece_index as usize];
+    if piece_hash == *expected_hash {
+        println!("Piece index {} verified successfully", piece_index);
+        Ok(piece_buffer)
+    } else {
+        Err(format!("Piece index {} verification failed", piece_index))
+    }
 }
 
 fn parse_messages(buf: &[u8]) -> Vec<PeerMessage> {
