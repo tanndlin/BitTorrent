@@ -128,28 +128,29 @@ pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) {
     let handshake_response = PeerHandshake::from_be_bytes(&response_buf);
     println!("Received handshake response: {:?}", handshake_response);
 
-    sleep(std::time::Duration::from_secs(2));
-    let mut buf = [0; 1024];
-    let bytes_read = stream.read(&mut buf).expect("Failed to read from peer");
-    println!(
-        "Read {} bytes from peer: {:?}",
-        bytes_read,
-        &buf[..bytes_read]
-    );
-
     let mut is_choked = true;
     let mut bitfield: Vec<u32> = vec![];
+    let mut buf = [0; 1024];
 
-    handle_messages(&buf[..bytes_read], &mut is_choked, &mut bitfield);
+    loop {
+        let bytes_read = stream.read(&mut buf).expect("Failed to read from peer");
+        println!(
+            "Read {} bytes from peer: {:?}",
+            bytes_read,
+            &buf[..bytes_read]
+        );
 
-    if is_choked {
-        println!("Cannot request pieces, we are choked");
-        return;
-    }
+        handle_messages(&buf[..bytes_read], &mut is_choked, &mut bitfield);
 
-    if bitfield.is_empty() {
-        println!("No pieces available from peer");
-        return;
+        if is_choked {
+            println!("Cannot request pieces, we are choked");
+        }
+
+        if !bitfield.is_empty() {
+            break;
+        }
+
+        sleep(std::time::Duration::from_secs(1));
     }
 
     let piece = get_piece_from_peer(&mut stream, torrent, bitfield[0]);
@@ -197,7 +198,7 @@ fn get_piece_from_peer(
             .write_all(&request_bytes)
             .expect("Failed to send request");
 
-        sleep(std::time::Duration::from_secs(1));
+        sleep(std::time::Duration::from_millis(100));
         let mut buf = [0; 32768];
         let bytes_read = stream
             .read(&mut buf)

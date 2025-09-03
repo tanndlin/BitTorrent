@@ -5,7 +5,7 @@ use std::{
     io::{Read, Write},
     net::{TcpStream, UdpSocket},
 };
-use tauri::utils::config::parse;
+use tauri::{http, utils::config::parse};
 use url::Url;
 
 mod bencoding;
@@ -15,7 +15,7 @@ use crate::{
     bencoding::{decode, util::Torrent},
     connection::{
         check_tracker, Action, AnnounceRequest, AnnounceResponse, Event, FromByte, HTTPResponse,
-        ToByte, ToUrl, TrackerRequest, TrackerResponse,
+        Peer, ToByte, ToUrl, TrackerRequest, TrackerResponse,
     },
     peer::{connect_to_peer, PeerHandshake},
 };
@@ -47,33 +47,44 @@ fn main() {
     //     }
     // }
 
-    let tracker_request = &parsed
+    let http_trackers: Vec<&String> = parsed
         .trackers
         .iter()
-        .find(|t| t.starts_with("http"))
-        .unwrap();
-    let response = get_peers_http(&parsed, tracker_request).unwrap();
-    println!("Tracker Response: {:?}", response);
+        .filter(|t| t.starts_with("http"))
+        .collect();
 
-    if let Some(err) = response.failure {
-        println!("Tracker failure reason: {:?}", err);
-        return;
-    }
+    let peers: Vec<Peer> = http_trackers
+        .iter()
+        .flat_map(|&tracker| {
+            let response = get_peers_http(&parsed, tracker).unwrap();
+            println!("Tracker Response: {:?}", response);
 
-    let response = response.success.expect("No success response from tracker");
-    println!("Interval: {}", response.interval);
-    println!("Leechers: {}", response.incomplete);
-    println!("Seeders: {}", response.complete);
-    println!("Peers: {:?}", response.peers);
+            if let Some(err) = response.failure {
+                println!("Tracker failure reason: {:?}", err);
+                return vec![];
+            }
 
-    if response.peers.is_empty() {
-        println!("No peers available from tracker");
-        return;
-    }
+            let response = response.success.expect("No success response from tracker");
+            println!("Interval: {}", response.interval);
+            println!("Leechers: {}", response.incomplete);
+            println!("Seeders: {}", response.complete);
+            println!("Peers: {:?}", response.peers);
 
-    let peer = &response.peers[0];
+            if response.peers.is_empty() {
+                println!("No peers available from tracker");
+                return vec![];
+            }
+
+            response.peers
+        })
+        .collect();
+
+    println!("Total peers collected: {}", peers.len());
+    dbg!(&peers);
+
+    let peer = &peers[0];
     println!("First peer IP: {}, Port: {}", peer.ip, peer.port);
-    connect_to_peer(peer, &parsed);
+    // connect_to_peer(peer, &parsed);
 }
 
 fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, String> {
@@ -95,7 +106,7 @@ fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, S
         event: Event::Started,
         ip: None,
         key: None,
-        num_want: None,
+        num_want: Some(100),
         port: 6969,
         compact: 1,
         no_peer_id: false,
