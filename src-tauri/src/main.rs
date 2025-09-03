@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::net::UdpSocket;
-use tauri::{http, utils::config::parse};
+// use tauri::{http, utils::config::parse};
 use url::Url;
 
 mod bencoding;
@@ -21,6 +21,9 @@ use crate::{
 
 fn main() {
     // bittorrent_lib::run();
+
+    // print current directory
+    println!("Current directory: {:?}", std::env::current_dir().unwrap());
 
     let path = glob::glob("**/*.torrent")
         .expect("Failed to read glob pattern")
@@ -64,6 +67,11 @@ fn main() {
 
     println!("Total peers collected: {}", peers.len());
     dbg!(&peers);
+
+    if peers.is_empty() {
+        println!("No peers available to connect to.");
+        return;
+    }
 
     let peer = &peers[0];
     println!("First peer IP: {}, Port: {}", peer.ip, peer.port);
@@ -116,6 +124,7 @@ fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, S
     Ok(tracker_response)
 }
 
+#[allow(dead_code)]
 fn get_peers_udp(torrent: &Torrent, tracker: &str) {
     // send a connect request
     let mut buf = [0; 16];

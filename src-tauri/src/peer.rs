@@ -3,7 +3,7 @@ use sha1::{Digest, Sha1};
 use crate::{
     bencoding::torrent::Torrent,
     connection::{FromByte, Peer, ToByte},
-    util::PeerMessageStream,
+    util::peer_message_stream::PeerMessageStream,
 };
 use std::{
     collections::HashMap,
