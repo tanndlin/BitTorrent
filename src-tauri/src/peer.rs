@@ -7,6 +7,7 @@ use crate::{
 };
 use std::{
     collections::HashMap,
+    fs::create_dir_all,
     io::{Read, Write},
     net::TcpStream,
 };
@@ -134,6 +135,23 @@ pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) {
     let mut is_choked = true;
     let mut bitfield: Vec<u32> = vec![];
     let mut pieces = HashMap::<u32, Vec<u8>>::new();
+    // Find all files in pieces directory
+    for entry in std::fs::read_dir("pieces").unwrap_or_else(|_| {
+        create_dir_all("pieces").expect("Failed to create pieces directory");
+        std::fs::read_dir("pieces").expect("Failed to read pieces directory")
+    }) {
+        let entry = entry.expect("Failed to read directory entry");
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(filename) = path.file_stem() {
+                if let Some(piece_index) = filename.to_str().and_then(|s| s.parse::<u32>().ok()) {
+                    let data = std::fs::read(&path).expect("Failed to read piece file");
+                    pieces.insert(piece_index, data);
+                    println!("Found existing piece: {}", piece_index);
+                }
+            }
+        }
+    }
 
     while pieces.len() < (torrent.info.pieces.len()) {
         println!(
@@ -168,6 +186,16 @@ pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) {
             Ok(data) => {
                 println!("Successfully downloaded piece: {} bytes", data.len());
                 pieces.insert(*needed_piece_index, data);
+                // write piece to file
+                create_dir_all("pieces").expect("Failed to create pieces directory");
+
+                let mut file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(format!("pieces/{}.bin", needed_piece_index))
+                    .expect("Failed to open file");
+                file.write_all(&pieces[needed_piece_index])
+                    .expect("Failed to write piece to file");
             }
             Err(e) => {
                 println!("Failed to download piece: {}", e);

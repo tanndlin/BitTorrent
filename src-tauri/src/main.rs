@@ -1,7 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::net::UdpSocket;
+use std::{net::UdpSocket, path::Path};
 // use tauri::{http, utils::config::parse};
 use url::Url;
 
@@ -22,10 +22,13 @@ use crate::{
 fn main() {
     // bittorrent_lib::run();
 
-    // print current directory
-    println!("Current directory: {:?}", std::env::current_dir().unwrap());
+    // Get abs path of main file
+    let exe_path = std::env::current_exe().expect("Failed to get current exe path");
+    let exe_dir = exe_path.parent().expect("Failed to get parent directory");
+    let pattern = exe_dir.join("*.torrent");
+    println!("Searching for .torrent files in: {}", pattern.display());
 
-    let path = glob::glob("**/*.torrent")
+    let path = glob::glob(pattern.to_str().unwrap())
         .expect("Failed to read glob pattern")
         .next()
         .expect("No .torrent files found")
