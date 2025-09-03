@@ -73,7 +73,7 @@ fn main() {
 
     let peer = &response.peers[0];
     println!("First peer IP: {}, Port: {}", peer.ip, peer.port);
-    connect_to_peer(peer, parsed.info_hash);
+    connect_to_peer(peer, &parsed);
 }
 
 fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, String> {

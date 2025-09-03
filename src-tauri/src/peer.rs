@@ -1,7 +1,10 @@
 use serde::de;
 use sha1::digest::typenum::bit;
 
-use crate::connection::{FromByte, Peer, ToByte};
+use crate::{
+    bencoding::util::Torrent,
+    connection::{FromByte, Peer, ToByte},
+};
 use std::{
     io::{Read, Write},
     net::TcpStream,
@@ -102,7 +105,7 @@ impl PeerMessage {
     }
 }
 
-pub fn connect_to_peer(peer: &Peer, info_hash: [u8; 20]) {
+pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) {
     let mut stream =
         TcpStream::connect((peer.ip.to_string(), peer.port)).expect("Failed to connect to peer");
     println!("Connected to peer: {:?}", stream);
@@ -110,7 +113,7 @@ pub fn connect_to_peer(peer: &Peer, info_hash: [u8; 20]) {
     let handshake_request = PeerHandshake {
         pstr: "BitTorrent protocol".to_owned(),
         reserved: [0; 8],
-        info_hash,
+        info_hash: torrent.info_hash,
         peer_id: *b"-TR2940-fuckmek6wWLc",
     };
 
@@ -126,7 +129,7 @@ pub fn connect_to_peer(peer: &Peer, info_hash: [u8; 20]) {
     let handshake_response = PeerHandshake::from_be_bytes(&response_buf);
     println!("Received handshake response: {:?}", handshake_response);
 
-    sleep(std::time::Duration::from_secs(1));
+    sleep(std::time::Duration::from_secs(2));
     let mut buf = [0; 1024];
     let bytes_read = stream.read(&mut buf).expect("Failed to read from peer");
     println!(
@@ -158,26 +161,34 @@ pub fn connect_to_peer(peer: &Peer, info_hash: [u8; 20]) {
         .expect("Failed to send interested message");
 
     let piece_index = bitfield[0];
-    let request_message = PeerMessage::create_request(piece_index, 0, 16384);
-    let request_bytes = request_message.to_be_bytes();
-    println!(
-        "Sending request for piece index {}: {:?}",
-        piece_index, request_bytes
-    );
-    stream
-        .write_all(&request_bytes)
-        .expect("Failed to send request");
+    let piece_length = torrent.info.piece_length;
+    let piece_buffer = vec![0; piece_length as usize];
+    loop {
+        let request_message = PeerMessage::create_request(piece_index, 0, 16384);
+        let request_bytes = request_message.to_be_bytes();
+        println!(
+            "Sending request for piece index {}: {:?}",
+            piece_index, request_bytes
+        );
+        stream
+            .write_all(&request_bytes)
+            .expect("Failed to send request");
 
-    sleep(std::time::Duration::from_secs(1));
-    let mut buf = [0; 16384 + 13];
-    let bytes_read = stream
-        .read(&mut buf)
-        .expect("Failed to read piece from peer");
-    println!(
-        "Read {} bytes from peer: {:?}",
-        bytes_read,
-        &buf[..bytes_read]
-    );
+        sleep(std::time::Duration::from_secs(1));
+        let mut buf = [0; 32768];
+        let bytes_read = stream
+            .read(&mut buf)
+            .expect("Failed to read piece from peer");
+        println!(
+            "Read {} bytes from peer {:?} for piece index {}",
+            bytes_read,
+            &buf[..bytes_read],
+            piece_index
+        );
+
+        let messages = handle_messages(&buf[..bytes_read], &mut is_choked, &mut bitfield);
+        println!("Is choked: {}, Bitfield: {:?}", is_choked, bitfield);
+    }
 
     // Close stream
     drop(stream);
@@ -226,7 +237,7 @@ fn parse_messages(buf: &[u8]) -> Vec<PeerMessage> {
     messages
 }
 
-fn handle_messages(buf: &[u8], is_choked: &mut bool, bitfield: &mut Vec<u32>) {
+fn handle_messages(buf: &[u8], is_choked: &mut bool, bitfield: &mut Vec<u32>) -> Vec<PeerMessage> {
     let messages = parse_messages(buf);
     for message in &messages {
         println!(
@@ -235,7 +246,7 @@ fn handle_messages(buf: &[u8], is_choked: &mut bool, bitfield: &mut Vec<u32>) {
         );
     }
 
-    for message in messages {
+    for message in &messages {
         match message.id {
             PeerMessageID::Choke => {
                 *is_choked = true;
@@ -303,4 +314,6 @@ fn handle_messages(buf: &[u8], is_choked: &mut bool, bitfield: &mut Vec<u32>) {
             }
         }
     }
+
+    messages
 }
