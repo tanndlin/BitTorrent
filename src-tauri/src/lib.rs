@@ -1,7 +1,7 @@
 use std::net::{ToSocketAddrs, UdpSocket};
 
 use crate::bencoding::decode;
-use crate::bencoding::util::Torrent;
+use crate::bencoding::torrent::Torrent;
 
 mod bencoding;
 

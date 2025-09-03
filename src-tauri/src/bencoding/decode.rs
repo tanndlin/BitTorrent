@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::collections::HashMap;
 
-use crate::bencoding::util::{self, File, Info, Torrent};
+use crate::bencoding::torrent::{self, File, Info, Torrent};
 
 pub fn parse_metainfo(content: &Vec<u8>) -> Torrent {
     let parsed = parse_dictionary(content, &mut 0);
@@ -115,12 +115,12 @@ pub enum Value {
 }
 
 pub fn parse_dictionary(content: &[u8], index: &mut usize) -> Value {
-    assert!(content[*index] == util::DICTIONARY_START);
+    assert!(content[*index] == torrent::DICTIONARY_START);
 
     *index += 1; // move past 'd'
     let mut map = HashMap::new();
 
-    while content[*index] != util::DICTIONARY_END {
+    while content[*index] != torrent::DICTIONARY_END {
         let key = get_string(content, index);
         println!("key: {key}");
         if key == "pieces" {
@@ -138,18 +138,18 @@ pub fn parse_dictionary(content: &[u8], index: &mut usize) -> Value {
         map.insert(key, value);
     }
 
-    assert!(content[*index] == util::DICTIONARY_END);
+    assert!(content[*index] == torrent::DICTIONARY_END);
     *index += 1; // move past 'e'
 
     Value::Dict(map)
 }
 
 fn parse_next(content: &[u8], index: &mut usize) -> Value {
-    if content[*index] == util::INTEGER_START {
+    if content[*index] == torrent::INTEGER_START {
         parse_number(content, index)
-    } else if content[*index] == util::DICTIONARY_START {
+    } else if content[*index] == torrent::DICTIONARY_START {
         parse_dictionary(content, index)
-    } else if content[*index] == util::LIST_START {
+    } else if content[*index] == torrent::LIST_START {
         parse_list(content, index)
     } else {
         Value::Str(get_string(content, index))
@@ -159,7 +159,7 @@ fn parse_next(content: &[u8], index: &mut usize) -> Value {
 fn parse_number(content: &[u8], index: &mut usize) -> Value {
     *index += 1;
     let number = get_next_number(content, index);
-    assert!(content[*index] == util::INTEGER_END);
+    assert!(content[*index] == torrent::INTEGER_END);
     *index += 1; // move past 'e'
     Value::Number(number)
 }
@@ -167,10 +167,10 @@ fn parse_number(content: &[u8], index: &mut usize) -> Value {
 fn parse_list(content: &[u8], index: &mut usize) -> Value {
     *index += 1; // move past 'l'
     let mut list = Vec::new();
-    while content[*index] != util::LIST_END {
+    while content[*index] != torrent::LIST_END {
         list.push(parse_next(content, index));
     }
-    assert!(content[*index] == util::LIST_END);
+    assert!(content[*index] == torrent::LIST_END);
     *index += 1; // move past 'e'
     Value::List(list)
 }
@@ -180,7 +180,7 @@ fn parse_hashes(content: &[u8], index: &mut usize) -> Vec<[u8; 20]> {
     let size = get_next_number(content, index);
 
     // Check for colon separator
-    assert!(content[*index] == util::COLON);
+    assert!(content[*index] == torrent::COLON);
     *index += 1; // move past ':'
 
     let mut hashes = Vec::new();
@@ -200,7 +200,7 @@ fn parse_hashes(content: &[u8], index: &mut usize) -> Vec<[u8; 20]> {
 
 fn parse_peers(content: &[u8], index: &mut usize) -> Vec<[u8; 6]> {
     let size = get_next_number(content, index) as usize;
-    assert!(content[*index] == util::COLON);
+    assert!(content[*index] == torrent::COLON);
     *index += 1; // move past ':'
     let mut peers = Vec::new();
     let end = *index + size;
@@ -218,7 +218,7 @@ fn parse_peers(content: &[u8], index: &mut usize) -> Vec<[u8; 6]> {
 fn get_string(content: &[u8], index: &mut usize) -> String {
     let size = get_next_number(content, index) as usize; // size cannot be negative here
 
-    assert!(content[*index] == util::COLON);
+    assert!(content[*index] == torrent::COLON);
     *index += 1;
     let ret = String::from_utf8(content[*index..size + *index].to_vec()).unwrap();
     *index += size as usize;
@@ -290,7 +290,7 @@ pub fn get_info_hash(content: &Vec<u8>, start: usize) -> [u8; 20] {
 
     // Find the "info" dictionary
     while index < content.len() {
-        if content[index] == util::DICTIONARY_START {
+        if content[index] == torrent::DICTIONARY_START {
             index += 1;
             let key = get_string(content, &mut index);
             if key == "info" {

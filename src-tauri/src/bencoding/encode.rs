@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::bencoding::{
     decode::Value,
-    util::{
+    torrent::{
         File, Info, Torrent, COLON, DICTIONARY_END, DICTIONARY_START, INTEGER_END, INTEGER_START,
         LIST_END, LIST_START,
     },

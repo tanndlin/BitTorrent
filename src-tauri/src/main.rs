@@ -1,23 +1,22 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{
-    io::{Read, Write},
-    net::{TcpStream, UdpSocket},
-};
+use std::net::UdpSocket;
 use tauri::{http, utils::config::parse};
 use url::Url;
 
 mod bencoding;
 mod connection;
 mod peer;
+mod util;
+
 use crate::{
-    bencoding::{decode, util::Torrent},
+    bencoding::{decode, torrent::Torrent},
     connection::{
-        check_tracker, Action, AnnounceRequest, AnnounceResponse, Event, FromByte, HTTPResponse,
-        Peer, ToByte, ToUrl, TrackerRequest, TrackerResponse,
+        Action, AnnounceRequest, AnnounceResponse, Event, FromByte, HTTPResponse, Peer, ToByte,
+        ToUrl, TrackerRequest, TrackerResponse,
     },
-    peer::{connect_to_peer, PeerHandshake},
+    peer::connect_to_peer,
 };
 
 fn main() {
@@ -30,22 +29,6 @@ fn main() {
         .expect("Failed to read path");
     let content = std::fs::read(path).expect("Failed to read file");
     let parsed = decode::parse_metainfo(&content);
-
-    // for tracker in &parsed.trackers {
-    //     match check_tracker(tracker.as_str()) {
-    //         Ok(res) => {
-    //             if res {
-    //                 if tracker.starts_with("udp://") {
-    //                     // test_udp(&parsed, tracker);
-    //                 } else if tracker.starts_with("http://") || tracker.starts_with("https://") {
-    //                     test_http(&parsed, tracker);
-    //                     break;
-    //                 }
-    //             }
-    //         }
-    //         Err(e) => println!("Error: {e}"),
-    //     }
-    // }
 
     let http_trackers: Vec<&String> = parsed
         .trackers
@@ -84,7 +67,7 @@ fn main() {
 
     let peer = &peers[0];
     println!("First peer IP: {}, Port: {}", peer.ip, peer.port);
-    // connect_to_peer(peer, &parsed);
+    connect_to_peer(peer, &parsed);
 }
 
 fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, String> {
