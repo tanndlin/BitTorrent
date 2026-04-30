@@ -31,12 +31,20 @@ fn main() {
     let content = std::fs::read(path).expect("Failed to read file");
     let parsed = decode::parse_metainfo(&content);
 
+    dbg!(&parsed.trackers);
     let http_trackers = parsed.trackers.iter().filter(|t| t.starts_with("http"));
 
     let peers: Vec<Peer> = http_trackers
         .into_iter()
         .flat_map(|tracker| {
-            let response = get_peers_http(&parsed, tracker).unwrap();
+            let response = match get_peers_http(&parsed, tracker) {
+                Ok(res) => res,
+                Err(err) => {
+                    println!("Error getting peers from tracker {}: {}", tracker, err);
+                    return vec![];
+                }
+            };
+
             println!("Tracker Response: {:?}", response);
 
             if let Some(err) = response.failure {
@@ -100,7 +108,7 @@ fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, S
 
     let url = format!("{}{}", tracker, connection_request.to_url_params());
     println!("Request URL: {}", url);
-    let response = reqwest::blocking::get(&url).expect("Failed to send request");
+    let response = reqwest::blocking::get(&url).map_err(|_| "Failed to send request")?;
     let status = response.status();
     println!("Response Status: {}", status);
 

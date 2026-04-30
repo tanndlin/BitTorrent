@@ -2,7 +2,7 @@ use sha1::{Digest, Sha1};
 // use tauri::http::request;
 
 use crate::{
-    bencoding::torrent::Torrent,
+    bencoding::{self, torrent::Torrent},
     connection::Peer,
     peer::types::{PeerHandshake, PeerMessage, PeerMessageID},
     util::peer_message_stream::PeerMessageStream,
@@ -18,9 +18,12 @@ pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) {
     let mut stream = TcpStream::connect((peer.ip, peer.port)).expect("Failed to connect to peer");
     println!("Connected to peer: {:?}", stream);
 
+    let mut reserved = [0; 8];
+    reserved[5] |= 0x10;
+
     let handshake_request = PeerHandshake {
         pstr: "BitTorrent protocol".to_owned(),
-        reserved: [0; 8],
+        reserved,
         info_hash: torrent.info_hash,
         peer_id: *b"-TR2940-fuckmek6wWLc",
     };
@@ -222,12 +225,12 @@ fn get_piece_from_peer(
                 piece_buffer[begin as usize..(begin + block.len() as u32) as usize]
                     .copy_from_slice(block);
                 received_blocks += 1;
-                println!(
-                    "Received block for piece index {}: begin {}, length {}",
-                    index,
-                    begin,
-                    block.len()
-                );
+                // println!(
+                //     "Received block for piece index {}: begin {}, length {}",
+                //     index,
+                //     begin,
+                //     block.len()
+                // );
             }
         }
     }
@@ -292,15 +295,15 @@ fn handle_message(message: &PeerMessage, is_choked: &mut bool, bitfield: &mut Ve
             );
         }
         PeerMessageID::Piece => {
-            let index = u32::from_be_bytes(message.payload[0..4].try_into().unwrap());
-            let begin = u32::from_be_bytes(message.payload[4..8].try_into().unwrap());
-            let block = &message.payload[8..];
-            println!(
-                "Received piece index: {}, begin: {}, block length: {}",
-                index,
-                begin,
-                block.len()
-            );
+            // let index = u32::from_be_bytes(message.payload[0..4].try_into().unwrap());
+            // let begin = u32::from_be_bytes(message.payload[4..8].try_into().unwrap());
+            // let block = &message.payload[8..];
+            // println!(
+            //     "Received piece index: {}, begin: {}, block length: {}",
+            //     index,
+            //     begin,
+            //     block.len()
+            // );
         }
         PeerMessageID::Cancel => {
             let index = u32::from_be_bytes(message.payload[0..4].try_into().unwrap());
@@ -314,6 +317,21 @@ fn handle_message(message: &PeerMessage, is_choked: &mut bool, bitfield: &mut Ve
         PeerMessageID::Port => {
             let port = u16::from_be_bytes(message.payload[0..2].try_into().unwrap());
             println!("Peer's DHT port: {}", port);
+        }
+        PeerMessageID::Extension => {
+            println!("Received extension message: {:?}", message.payload);
+            let extension_id = message.payload[0];
+            let extension_id_str = match extension_id {
+                0 => "ut_metadata",
+                1 => "ut_pex",
+                2 => "ut_holepunch",
+                _ => "unknown",
+            };
+            println!("Extension ID: {} ({})", extension_id, extension_id_str);
+
+            let dictionary =
+                bencoding::decode::parse_dictionary(&message.payload[1..], &mut 0usize);
+            println!("Decoded extension message: {:?}", dictionary);
         }
     }
 }
