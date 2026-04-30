@@ -1,19 +1,9 @@
 use core::panic;
 use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 
-use reqwest::Response;
 use url::Url;
-use urlencoding::decode;
 
 use crate::bencoding::decode::{parse_dictionary, Value};
-
-pub trait ToByte {
-    fn to_be_bytes(&self) -> Vec<u8>;
-}
-
-pub trait FromByte {
-    fn from_be_bytes(bytes: &[u8]) -> Self;
-}
 
 pub trait ToUrl {
     fn to_url_params(&self) -> String;
@@ -185,7 +175,7 @@ impl HTTPResponse for TrackerResponse {
             };
 
             let peers = if let Value::Peers(s) = &map["peers"] {
-                s.iter().map(|x| Peer::from_be_bytes(x)).collect()
+                s.iter().map(|x| Peer::from(*x)).collect()
             } else {
                 vec![]
             };
@@ -222,27 +212,27 @@ pub struct AnnounceRequest {
     pub port: u16,
 }
 
-impl ToByte for AnnounceRequest {
-    fn to_be_bytes(&self) -> Vec<u8> {
+impl From<AnnounceRequest> for Vec<u8> {
+    fn from(request: AnnounceRequest) -> Self {
         let mut buf = [0; 98];
-        buf[0..8].copy_from_slice(&self.connection_id.to_be_bytes());
-        buf[8..12].copy_from_slice(&(self.action as u32).to_be_bytes());
-        buf[12..16].copy_from_slice(&self.transaction_id.to_be_bytes());
-        buf[16..36].copy_from_slice(&self.info_hash);
-        buf[36..56].copy_from_slice(&self.peer_id);
-        buf[56..64].copy_from_slice(&self.downloaded.to_be_bytes());
-        buf[64..72].copy_from_slice(&self.left.to_be_bytes());
-        buf[72..80].copy_from_slice(&self.uploaded.to_be_bytes());
-        buf[80..84].copy_from_slice(&(self.event as u32).to_be_bytes());
-        if let Some(ip) = &self.ip {
+        buf[0..8].copy_from_slice(&request.connection_id.to_be_bytes());
+        buf[8..12].copy_from_slice(&(request.action as u32).to_be_bytes());
+        buf[12..16].copy_from_slice(&request.transaction_id.to_be_bytes());
+        buf[16..36].copy_from_slice(&request.info_hash);
+        buf[36..56].copy_from_slice(&request.peer_id);
+        buf[56..64].copy_from_slice(&request.downloaded.to_be_bytes());
+        buf[64..72].copy_from_slice(&request.left.to_be_bytes());
+        buf[72..80].copy_from_slice(&request.uploaded.to_be_bytes());
+        buf[80..84].copy_from_slice(&(request.event as u32).to_be_bytes());
+        if let Some(ip) = &request.ip {
             match ip {
                 IpAddr::V4(ipv4) => buf[84..88].copy_from_slice(&ipv4.octets()),
                 IpAddr::V6(_) => buf[84..88].copy_from_slice(&[0, 0, 0, 0]), // or handle IPv6 as needed
             }
         }
-        buf[88..92].copy_from_slice(&self.key.to_be_bytes());
-        buf[92..96].copy_from_slice(&self.num_want.to_be_bytes());
-        buf[96..98].copy_from_slice(&self.port.to_be_bytes());
+        buf[88..92].copy_from_slice(&request.key.to_be_bytes());
+        buf[92..96].copy_from_slice(&request.num_want.to_be_bytes());
+        buf[96..98].copy_from_slice(&request.port.to_be_bytes());
 
         buf.to_vec()
     }
@@ -254,12 +244,18 @@ pub struct Peer {
     pub port: u16,
 }
 
-impl FromByte for Peer {
-    fn from_be_bytes(bytes: &[u8]) -> Self {
+impl From<[u8; 6]> for Peer {
+    fn from(bytes: [u8; 6]) -> Self {
         Peer {
             ip: IpAddr::V4(Ipv4Addr::from(<[u8; 4]>::try_from(&bytes[0..4]).unwrap())),
             port: u16::from_be_bytes(bytes[4..6].try_into().unwrap()),
         }
+    }
+}
+
+impl From<&[u8]> for Peer {
+    fn from(bytes: &[u8]) -> Self {
+        Peer::from(<[u8; 6]>::try_from(bytes).unwrap())
     }
 }
 
@@ -273,17 +269,14 @@ pub struct AnnounceResponse {
     pub peers: Vec<Peer>,
 }
 
-impl FromByte for AnnounceResponse {
-    fn from_be_bytes(bytes: &[u8]) -> Self {
+impl From<&[u8]> for AnnounceResponse {
+    fn from(bytes: &[u8]) -> Self {
         let action = u32::from_be_bytes(bytes[0..4].try_into().unwrap());
         let transaction_id = u32::from_be_bytes(bytes[4..8].try_into().unwrap());
         let interval = u32::from_be_bytes(bytes[8..12].try_into().unwrap());
         let leechers = u32::from_be_bytes(bytes[12..16].try_into().unwrap());
         let seeders = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
-        let peers: Vec<Peer> = bytes[20..]
-            .chunks_exact(6)
-            .map(Peer::from_be_bytes)
-            .collect();
+        let peers: Vec<Peer> = bytes[20..].chunks_exact(6).map(Peer::from).collect();
 
         AnnounceResponse {
             action,
@@ -303,13 +296,13 @@ pub struct ScrapeRequest {
     pub hashes: Vec<[u8; 20]>,
 }
 
-impl ToByte for ScrapeRequest {
-    fn to_be_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::<u8>::new();
-        buf.extend_from_slice(&self.connection_id.to_be_bytes());
-        buf.extend_from_slice(&self.action.to_be_bytes());
-        buf.extend_from_slice(&self.transaction_id.to_be_bytes());
-        for hash in &self.hashes {
+impl From<ScrapeRequest> for Vec<u8> {
+    fn from(req: ScrapeRequest) -> Self {
+        let mut buf = vec![];
+        buf.extend_from_slice(&req.connection_id.to_be_bytes());
+        buf.extend_from_slice(&req.action.to_be_bytes());
+        buf.extend_from_slice(&req.transaction_id.to_be_bytes());
+        for hash in &req.hashes {
             buf.extend_from_slice(hash);
         }
 
@@ -323,8 +316,8 @@ pub struct ScrapeSubresponse {
     pub leechers: u32,
 }
 
-impl FromByte for ScrapeSubresponse {
-    fn from_be_bytes(bytes: &[u8]) -> ScrapeSubresponse {
+impl From<&[u8]> for ScrapeSubresponse {
+    fn from(bytes: &[u8]) -> ScrapeSubresponse {
         ScrapeSubresponse {
             seeders: u32::from_be_bytes(bytes[0..4].try_into().unwrap()),
             completed: u32::from_be_bytes(bytes[4..8].try_into().unwrap()),
@@ -339,15 +332,15 @@ pub struct ScrapeResponse {
     pub sub_response: Vec<ScrapeSubresponse>,
 }
 
-impl FromByte for ScrapeResponse {
-    fn from_be_bytes(bytes: &[u8]) -> ScrapeResponse {
+impl From<&[u8]> for ScrapeResponse {
+    fn from(bytes: &[u8]) -> ScrapeResponse {
         let action = u32::from_be_bytes(bytes[0..4].try_into().unwrap());
         let transaction_id = u32::from_be_bytes(bytes[4..8].try_into().unwrap());
         let mut sub_response = Vec::<ScrapeSubresponse>::new();
 
         let mut index = 8;
         while index < bytes.len() {
-            sub_response.push(ScrapeSubresponse::from_be_bytes(&bytes[index..index + 12]));
+            sub_response.push(ScrapeSubresponse::from(&bytes[index..index + 12]));
             index += 12;
         }
 

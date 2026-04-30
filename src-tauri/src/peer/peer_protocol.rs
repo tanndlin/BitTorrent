@@ -3,7 +3,7 @@ use sha1::{Digest, Sha1};
 
 use crate::{
     bencoding::torrent::Torrent,
-    connection::{FromByte, Peer, ToByte},
+    connection::Peer,
     peer::types::{PeerHandshake, PeerMessage, PeerMessageID},
     util::peer_message_stream::PeerMessageStream,
 };
@@ -25,7 +25,7 @@ pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) {
         peer_id: *b"-TR2940-fuckmek6wWLc",
     };
 
-    let handshake_bytes = handshake_request.to_be_bytes();
+    let handshake_bytes = Vec::from(&handshake_request);
     println!("Sending handshake: {:?}", handshake_bytes);
     stream
         .write_all(&handshake_bytes)
@@ -35,7 +35,7 @@ pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) {
     stream
         .read_exact(&mut response_buf)
         .expect("Failed to read handshake response");
-    let handshake_response = PeerHandshake::from_be_bytes(&response_buf);
+    let handshake_response = PeerHandshake::from(response_buf);
     println!("Received handshake response: {:?}", handshake_response);
 
     let mut peer_message_stream = PeerMessageStream::new(stream);
@@ -82,7 +82,7 @@ pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) {
         length: (1 + bitfield_payload.len()) as u32,
         payload: bitfield_payload,
     };
-    let bitfield_bytes = bitfield_message.to_be_bytes();
+    let bitfield_bytes = Vec::from(&bitfield_message);
     println!(
         "Sending bitfield message of length: {:?}",
         bitfield_bytes.len()
@@ -92,7 +92,7 @@ pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) {
         .expect("Failed to send bitfield message");
 
     let interested_message = PeerMessage::create_interested();
-    let interested_bytes = interested_message.to_be_bytes();
+    let interested_bytes = Vec::from(&interested_message);
     println!("Sending interested message: {:?}", interested_bytes);
     peer_message_stream
         .write_all(&interested_bytes)
@@ -200,7 +200,7 @@ fn get_piece_from_peer(
             16384
         };
         let request_message = PeerMessage::create_request(piece_index, *start, length);
-        let request_bytes = request_message.to_be_bytes();
+        let request_bytes = Vec::from(&request_message);
         stream
             .write_all(&request_bytes)
             .expect("Failed to send request");

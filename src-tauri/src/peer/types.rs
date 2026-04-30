@@ -1,5 +1,3 @@
-use crate::connection::{FromByte, ToByte};
-
 #[derive(Debug)]
 pub struct PeerHandshake {
     pub pstr: String,
@@ -8,21 +6,21 @@ pub struct PeerHandshake {
     pub peer_id: [u8; 20],
 }
 
-impl ToByte for PeerHandshake {
-    fn to_be_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::<u8>::new();
-        buf.push(self.pstr.len() as u8);
-        buf.extend_from_slice(self.pstr.as_bytes());
-        buf.extend_from_slice(&self.reserved);
-        buf.extend_from_slice(&self.info_hash);
-        buf.extend_from_slice(&self.peer_id);
+impl From<&PeerHandshake> for Vec<u8> {
+    fn from(handshake: &PeerHandshake) -> Vec<u8> {
+        let mut buf = vec![];
+        buf.push(handshake.pstr.len() as u8);
+        buf.extend_from_slice(handshake.pstr.as_bytes());
+        buf.extend_from_slice(&handshake.reserved);
+        buf.extend_from_slice(&handshake.info_hash);
+        buf.extend_from_slice(&handshake.peer_id);
 
         buf
     }
 }
 
-impl FromByte for PeerHandshake {
-    fn from_be_bytes(bytes: &[u8]) -> Self {
+impl From<[u8; 68]> for PeerHandshake {
+    fn from(bytes: [u8; 68]) -> Self {
         let pstr_len = bytes[0] as usize;
         let pstr = String::from_utf8(bytes[1..1 + pstr_len].to_vec()).unwrap();
         let mut reserved = [0; 8];
@@ -56,18 +54,19 @@ pub enum PeerMessageID {
     Port = 9,
 }
 
+#[derive(Debug)]
 pub struct PeerMessage {
     pub id: PeerMessageID,
     pub length: u32,
     pub payload: Vec<u8>,
 }
 
-impl ToByte for PeerMessage {
-    fn to_be_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::<u8>::new();
-        buf.extend_from_slice(&(self.length).to_be_bytes());
-        buf.push(self.id as u8);
-        buf.extend_from_slice(&self.payload);
+impl From<&PeerMessage> for Vec<u8> {
+    fn from(message: &PeerMessage) -> Self {
+        let mut buf = vec![];
+        buf.extend_from_slice(&(message.length).to_be_bytes());
+        buf.push(message.id as u8);
+        buf.extend_from_slice(&message.payload);
 
         buf
     }
