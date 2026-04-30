@@ -321,7 +321,7 @@ fn handle_message(message: &PeerMessage, is_choked: &mut bool, bitfield: &mut Ve
             let port = u16::from_be_bytes(message.payload[0..2].try_into().unwrap());
             println!("Peer's DHT port: {}", port);
         }
-        PeerMessageID::Extension => {
+        PeerMessageID::Extended => {
             println!("Received extension message: {:?}", message.payload);
             let extension_id = message.payload[0];
             let extension_id_str = match extension_id {

@@ -68,6 +68,7 @@ fn parse_next_peer_message(buf: &[u8]) -> Option<(PeerMessage, usize)> {
         7 => PeerMessageID::Piece,
         8 => PeerMessageID::Cancel,
         9 => PeerMessageID::Port,
+        20 => PeerMessageID::Extended,
         _ => {
             println!("Unknown message ID: {}", buf[4]);
             return None;

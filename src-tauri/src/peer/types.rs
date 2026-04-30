@@ -52,7 +52,7 @@ pub enum PeerMessageID {
     Piece = 7,
     Cancel = 8,
     Port = 9,
-    Extension = 20,
+    Extended = 20,
 }
 
 #[derive(Debug)]
