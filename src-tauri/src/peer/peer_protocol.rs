@@ -117,22 +117,14 @@ pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) -> Result<(), String> {
             continue;
         }
 
-        if !bitfield
-            .iter()
-            .any(|&piece_index| !pieces.contains_key(&piece_index))
-        {
+        if bitfield.is_empty() {
             continue;
         }
 
-        let needed_piece_index = match bitfield
-            .iter()
-            .find(|&&piece_index| !pieces.contains_key(&piece_index))
-        {
-            Some(&index) => index,
-            None => {
-                continue;
-            }
-        };
+        // Find a piece index that we need and the peer has
+        let needed_piece_index = (0..torrent.info.pieces.len() as u32)
+            .find(|&i| !pieces.contains_key(&i) && bitfield_contains_piece(&bitfield, i))
+            .ok_or_else(|| "Peer has no pieces we need".to_string())?;
 
         if is_choked {
             continue;
@@ -147,7 +139,7 @@ pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) -> Result<(), String> {
         );
         match piece {
             Ok(data) => {
-                println!("Successfully downloaded piece: {} bytes", data.len());
+                // println!("Successfully downloaded piece: {} bytes", data.len());
                 pieces.insert(needed_piece_index, data);
                 // write piece to file
                 create_dir_all("pieces").expect("Failed to create pieces directory");
@@ -198,7 +190,7 @@ fn get_piece_from_peer(
         }
     }
 
-    println!("Sending request for piece index: {}", piece_index);
+    // println!("Sending request for piece index: {}", piece_index);
     let mut offsets = Vec::new();
     let mut offset = 0;
     while offset < piece_length {
@@ -230,18 +222,11 @@ fn get_piece_from_peer(
                     .copy_from_slice(block);
                 received_blocks += 1;
                 // println!(
-                //     "Received block for piece index {}: begin {}, length {}",
-                //     index,
-                //     begin,
-                //     block.len()
+                //     "Received block {}/{} for piece index {}",
+                //     received_blocks,
+                //     requests.len(),
+                //     index
                 // );
-
-                println!(
-                    "Received block {}/{} for piece index {}",
-                    received_blocks,
-                    requests.len(),
-                    index
-                );
             }
         }
     }
@@ -251,7 +236,7 @@ fn get_piece_from_peer(
     let piece_hash: [u8; 20] = hasher.finalize().into();
     let expected_hash = &torrent.info.pieces[piece_index as usize];
     if piece_hash == *expected_hash {
-        println!("Piece index {} verified successfully", piece_index);
+        // println!("Piece index {} verified successfully", piece_index);
         Ok(piece_buffer)
     } else {
         Err(format!("Piece index {} verification failed", piece_index))
@@ -259,7 +244,7 @@ fn get_piece_from_peer(
 }
 
 fn handle_message(message: &PeerMessage, is_choked: &mut bool, bitfield: &mut Vec<u32>) {
-    println!("Message ID: {:?}, Length: {}", message.id, message.length);
+    // println!("Message ID: {:?}, Length: {}", message.id, message.length);
 
     match message.id {
         PeerMessageID::KeepAlive => {
@@ -344,5 +329,15 @@ fn handle_message(message: &PeerMessage, is_choked: &mut bool, bitfield: &mut Ve
                 bencoding::decode::parse_dictionary(&message.payload[1..], &mut 0usize);
             println!("Decoded extension message: {:?}", dictionary);
         }
+    }
+}
+
+fn bitfield_contains_piece(bitfield: &[u32], piece_index: u32) -> bool {
+    let byte_index = piece_index / 8;
+    let bit_index = 7 - (piece_index % 8);
+    if let Some(byte) = bitfield.get(byte_index as usize) {
+        (byte >> bit_index) & 1 == 1
+    } else {
+        false
     }
 }
