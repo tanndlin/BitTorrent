@@ -199,22 +199,23 @@ fn get_piece_from_peer(
     }
 
     println!("Sending request for piece index: {}", piece_index);
-    for start in &requests {
-        let length = if piece_length - start < 16384 {
-            piece_length - start
-        } else {
-            16384
-        };
-        let request_message = PeerMessage::create_request(piece_index, *start, length);
-        let request_bytes = Vec::from(&request_message);
+    let mut offsets = Vec::new();
+    let mut offset = 0;
+    while offset < piece_length {
+        offsets.push(offset);
+        offset += 16384;
+    }
+
+    for &start in &offsets {
+        let length = std::cmp::min(16384, piece_length - start);
+        let request_message = PeerMessage::create_request(piece_index, start, length);
         stream
-            .write_all(&request_bytes)
+            .write_all(&Vec::from(&request_message))
             .expect("Failed to send request");
     }
 
     let mut received_blocks = 0;
-
-    while received_blocks < requests.len() {
+    while received_blocks < offsets.len() {
         let message = stream.get_next_message();
         handle_message(&message, is_choked, bitfield);
 
@@ -234,6 +235,13 @@ fn get_piece_from_peer(
                 //     begin,
                 //     block.len()
                 // );
+
+                println!(
+                    "Received block {}/{} for piece index {}",
+                    received_blocks,
+                    requests.len(),
+                    index
+                );
             }
         }
     }

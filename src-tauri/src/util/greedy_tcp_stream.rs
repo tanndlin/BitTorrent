@@ -13,8 +13,9 @@ pub struct GreedyTcpStream<T> {
 
 impl<T> GreedyTcpStream<T> {
     pub fn get_next_message(&mut self) -> T {
-        // flush out any complete messages from the buffer, and if there are none, read more data until we get one
-        self.stream.flush().expect("Failed to flush TCP stream");
+        self.stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(120)))
+            .expect("Failed to set read timeout");
 
         loop {
             if let Some((message, bytes_used)) = (self.parser)(&self.bytes_left) {
@@ -23,9 +24,6 @@ impl<T> GreedyTcpStream<T> {
             }
 
             let mut buf = [0; 32768];
-            self.stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-                .expect("Failed to set read timeout");
 
             match self.stream.read(&mut buf) {
                 Ok(bytes_read) => {
