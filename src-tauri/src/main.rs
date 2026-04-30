@@ -75,9 +75,20 @@ fn main() {
         return;
     }
 
-    let peer = &peers[0];
-    println!("First peer IP: {}, Port: {}", peer.ip, peer.port);
-    connect_to_peer(peer, &parsed);
+    // let peer = &peers[0];
+    // println!("First peer IP: {}, Port: {}", peer.ip, peer.port);
+    // connect_to_peer(peer, &parsed);
+
+    for peer in peers {
+        println!("Attempting to connect to peer: {}:{}", peer.ip, peer.port);
+        match connect_to_peer(&peer, &parsed) {
+            Ok(_) => println!("Successfully connected to peer: {}:{}", peer.ip, peer.port),
+            Err(err) => println!(
+                "Failed to connect to peer {}:{} - {}",
+                peer.ip, peer.port, err
+            ),
+        }
+    }
 }
 
 fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, String> {

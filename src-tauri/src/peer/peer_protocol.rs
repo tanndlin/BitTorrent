@@ -14,8 +14,9 @@ use std::{
     net::TcpStream,
 };
 
-pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) {
-    let mut stream = TcpStream::connect((peer.ip, peer.port)).expect("Failed to connect to peer");
+pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) -> Result<(), String> {
+    let mut stream = TcpStream::connect((peer.ip, peer.port))
+        .map_err(|e| format!("Failed to connect to peer {}: {}", peer.ip, e))?;
     println!("Connected to peer: {:?}", stream);
 
     let mut reserved = [0; 8];
@@ -173,6 +174,8 @@ pub fn connect_to_peer(peer: &Peer, torrent: &Torrent) {
 
     // Close stream
     drop(peer_message_stream);
+    println!("Finished downloading all pieces, closing connection to peer");
+    Ok(())
 }
 
 fn get_piece_from_peer(

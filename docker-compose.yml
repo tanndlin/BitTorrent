@@ -22,3 +22,9 @@ services:
       - ./docker/qbittorrent/downloads:/downloads
       - ./docker/torrents:/torrents
     restart: unless-stopped
+  bittorrent-client:
+    build: src-tauri
+    depends_on:
+      - opentracker
+    volumes:
+      - ./docker/torrents:/torrents
