@@ -13,6 +13,9 @@ pub struct GreedyTcpStream<T> {
 
 impl<T> GreedyTcpStream<T> {
     pub fn get_next_message(&mut self) -> T {
+        // flush out any complete messages from the buffer, and if there are none, read more data until we get one
+        self.stream.flush().expect("Failed to flush TCP stream");
+
         loop {
             if let Some((message, bytes_used)) = (self.parser)(&self.bytes_left) {
                 self.bytes_left.drain(0..bytes_used);
@@ -27,8 +30,9 @@ impl<T> GreedyTcpStream<T> {
             match self.stream.read(&mut buf) {
                 Ok(bytes_read) => {
                     if bytes_read == 0 {
-                        panic!("Connection closed");
+                        panic!("Connection closed... read 0 bytes");
                     }
+
                     self.bytes_left.extend_from_slice(&buf[..bytes_read]);
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
@@ -41,6 +45,39 @@ impl<T> GreedyTcpStream<T> {
                 }
                 Err(e) => panic!("Failed to read from TCP stream: {}", e),
             }
+        }
+    }
+
+    pub fn try_read_message(&mut self) -> Option<T> {
+        // First check already-buffered bytes
+        if let Some((message, bytes_used)) = (self.parser)(&self.bytes_left) {
+            self.bytes_left.drain(0..bytes_used);
+            return Some(message);
+        }
+
+        // Try a non-blocking read
+        self.stream
+            .set_read_timeout(Some(std::time::Duration::from_millis(100)))
+            .unwrap();
+
+        let mut buf = [0u8; 32768];
+        match self.stream.read(&mut buf) {
+            Ok(0) => panic!("Connection closed"),
+            Ok(n) => {
+                self.bytes_left.extend_from_slice(&buf[..n]);
+                if let Some((message, bytes_used)) = (self.parser)(&self.bytes_left) {
+                    self.bytes_left.drain(0..bytes_used);
+                    return Some(message);
+                }
+                None
+            }
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                None
+            }
+            Err(e) => panic!("Read error: {}", e),
         }
     }
 }

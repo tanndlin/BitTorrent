@@ -29,6 +29,10 @@ impl PeerMessageStream {
     pub fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
         self.stream.stream.write_all(buf)
     }
+
+    pub fn try_read_message(&mut self) -> Option<PeerMessage> {
+        self.stream.try_read_message()
+    }
 }
 
 fn parse_next_peer_message(buf: &[u8]) -> Option<(PeerMessage, usize)> {

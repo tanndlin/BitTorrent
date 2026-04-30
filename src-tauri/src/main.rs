@@ -1,9 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{net::UdpSocket, path::Path};
 // use tauri::{http, utils::config::parse};
-use url::Url;
 
 mod bencoding;
 mod connection;
@@ -12,10 +10,7 @@ mod util;
 
 use crate::{
     bencoding::{decode, torrent::Torrent},
-    connection::{
-        Action, AnnounceRequest, AnnounceResponse, Event, FromByte, HTTPResponse, Peer, ToByte,
-        ToUrl, TrackerRequest, TrackerResponse,
-    },
+    connection::{Event, HTTPResponse, Peer, ToUrl, TrackerRequest, TrackerResponse},
     peer::connect_to_peer,
 };
 
@@ -36,15 +31,11 @@ fn main() {
     let content = std::fs::read(path).expect("Failed to read file");
     let parsed = decode::parse_metainfo(&content);
 
-    let http_trackers: Vec<&String> = parsed
-        .trackers
-        .iter()
-        .filter(|t| t.starts_with("http"))
-        .collect();
+    let http_trackers = parsed.trackers.iter().filter(|t| t.starts_with("http"));
 
     let peers: Vec<Peer> = http_trackers
-        .iter()
-        .flat_map(|&tracker| {
+        .into_iter()
+        .flat_map(|tracker| {
             let response = get_peers_http(&parsed, tracker).unwrap();
             println!("Tracker Response: {:?}", response);
 
@@ -125,103 +116,4 @@ fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, S
     dbg!(&tracker_response);
 
     Ok(tracker_response)
-}
-
-#[allow(dead_code)]
-fn get_peers_udp(torrent: &Torrent, tracker: &str) {
-    // send a connect request
-    let mut buf = [0; 16];
-    buf[0..8].copy_from_slice(&0x41727101980u64.to_be_bytes());
-    buf[8..12].copy_from_slice(&0u32.to_be_bytes());
-    buf[12..16].copy_from_slice(&rand::random::<u32>().to_be_bytes());
-    println!("Connect request: {:?}", &buf);
-
-    let socket = UdpSocket::bind("0.0.0.0:6969").expect("Failed to bind socket");
-    let url = Url::parse(tracker).expect("Invalid URL");
-
-    // 3. Resolve the target URL to a SocketAddr.
-    let host = url.host_str().expect("No host in URL");
-    let port = url.port().unwrap_or(80);
-    let remote_addr = format!("{}:{}", host, port);
-
-    socket
-        .send_to(&buf, &remote_addr)
-        .expect("Failed to send data");
-    println!("UDP datagram sent to {}", remote_addr);
-    let mut buf = [0; 1024];
-    socket
-        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-        .expect("Failed to set read timeout");
-    // Receive repoonse
-    let res = socket.recv_from(&mut buf);
-    if res.is_err() {
-        println!("No response received (timeout or error)");
-        return;
-    }
-
-    let (amt, src) = res.unwrap();
-    println!("Received {} bytes from {}: {:?}", amt, src, &buf[..amt]);
-
-    let action = u32::from_be_bytes(buf[0..4].try_into().unwrap());
-    let transaction_id = u32::from_be_bytes(buf[4..8].try_into().unwrap());
-    let connection_id = u64::from_be_bytes(buf[8..16].try_into().unwrap());
-    println!(
-        "Action: {}, Transaction ID: {}, Connection ID: {}",
-        action, transaction_id, connection_id
-    );
-
-    // Send announce request
-    let peer_id_str = "-TR2940-fuckmek6wWLc";
-    let peer_id: [u8; 20] = {
-        let bytes = peer_id_str.as_bytes();
-        let mut arr = [0u8; 20];
-        arr[..bytes.len().min(20)].copy_from_slice(&bytes[..bytes.len().min(20)]);
-        arr
-    };
-
-    let left = if let Some(length) = torrent.info.length {
-        length as u64
-    } else {
-        torrent.info.files.as_ref().unwrap()[0].length as u64
-    };
-
-    let announce_request = AnnounceRequest {
-        action: Action::AnnounceRequest,
-        connection_id,
-        downloaded: 0,
-        transaction_id,
-        info_hash: torrent.info_hash,
-        event: Event::Empty,
-        ip: None,
-        key: 69420,
-        peer_id,
-        left,
-        uploaded: 0,
-        port: 6969,
-        num_want: -1,
-    };
-
-    let buf = announce_request.to_be_bytes();
-    println!("Announce request: {:?}", &buf);
-    socket
-        .send_to(&buf, &remote_addr)
-        .expect("Failed to send data");
-
-    let mut buf = [0; 1024];
-    socket
-        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-        .expect("Failed to set read timeout");
-    // Receive repoonse
-    let res = socket.recv_from(&mut buf);
-    if res.is_err() {
-        println!("No response received (timeout or error)");
-        return;
-    }
-
-    let (amt, src) = res.unwrap();
-    let num_peers = (amt - 20) / 6;
-    println!("Received {amt} bytes, with {num_peers} peers");
-    println!("Received {} bytes from {}: {:?}", amt, src, &buf[..amt]);
-    let announce_response = AnnounceResponse::from_be_bytes(&buf[..amt]);
-    dbg!(announce_response);
 }
