@@ -67,6 +67,7 @@ pub fn encode_value(value: Value) -> Vec<u8> {
     match value {
         Value::Number(n) => encode_number(n),
         Value::Str(s) => encode_string(&s),
+        Value::Bytes(b) => encode_bytes(b),
         Value::Dict(dict) => encode_dictionary(dict),
         Value::List(l) => encode_list(l),
         Value::Hashes(h) => encode_hashes(h),
@@ -126,6 +127,17 @@ fn encode_hashes(hashes: Vec<[u8; 20]>) -> Vec<u8> {
     for hash in hashes {
         ret.extend_from_slice(&hash);
     }
+
+    ret
+}
+
+fn encode_bytes(bytes: Vec<u8>) -> Vec<u8> {
+    let mut ret = Vec::<u8>::new();
+
+    let length = bytes.len();
+    ret.extend_from_slice(length.to_string().as_bytes());
+    ret.push(COLON);
+    ret.extend_from_slice(&bytes);
 
     ret
 }

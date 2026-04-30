@@ -107,6 +107,7 @@ pub fn parse_metainfo(content: &Vec<u8>) -> Torrent {
 pub enum Value {
     Number(i64),
     Str(String),
+    Bytes(Vec<u8>),
     Dict(HashMap<String, Value>),
     List(Vec<Value>),
     Hashes(Vec<[u8; 20]>),
@@ -152,7 +153,12 @@ fn parse_next(content: &[u8], index: &mut usize) -> Value {
     } else if content[*index] == torrent::LIST_START {
         parse_list(content, index)
     } else {
-        Value::Str(get_string(content, index))
+        let bytes = get_bytes(content, index);
+        // Try UTF-8, fall back to raw bytes
+        match String::from_utf8(bytes.clone()) {
+            Ok(s) => Value::Str(s),
+            Err(_) => Value::Bytes(bytes),
+        }
     }
 }
 
@@ -215,15 +221,18 @@ fn parse_peers(content: &[u8], index: &mut usize) -> Vec<[u8; 6]> {
     peers
 }
 
-fn get_string(content: &[u8], index: &mut usize) -> String {
-    let size = get_next_number(content, index) as usize; // size cannot be negative here
-
+fn get_bytes(content: &[u8], index: &mut usize) -> Vec<u8> {
+    let size = get_next_number(content, index) as usize;
     assert!(content[*index] == torrent::COLON);
     *index += 1;
-    let ret = String::from_utf8(content[*index..size + *index].to_vec()).unwrap();
-    *index += size as usize;
+    let bytes = content[*index..*index + size].to_vec();
+    *index += size;
+    bytes
+}
 
-    ret
+fn get_string(content: &[u8], index: &mut usize) -> String {
+    let bytes = get_bytes(content, index);
+    String::from_utf8(bytes).unwrap()
 }
 
 fn get_next_number(content: &[u8], index: &mut usize) -> i64 {
@@ -254,6 +263,7 @@ pub fn print_map(map: &HashMap<String, Value>) {
         print!("{}: ", key);
         match value {
             Value::Str(s) => println!("{s}"),
+            Value::Bytes(b) => println!("{:?}", b),
             Value::Number(n) => println!("{n}"),
             Value::Dict(d) => print_map(d),
             Value::Hashes(h) => print_hashes(h),
@@ -268,6 +278,7 @@ fn print_list(list: &Vec<Value>) {
     for value in list {
         match value {
             Value::Str(s) => print!("{s} "),
+            Value::Bytes(b) => print!("{:?} ", b),
             Value::Number(n) => print!("{n} "),
             Value::Dict(d) => print_map(d),
             Value::Hashes(h) => print_hashes(h),
