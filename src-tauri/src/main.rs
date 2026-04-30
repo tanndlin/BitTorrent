@@ -1,5 +1,8 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(not(debug_assertions), feature = "desktop"),
+    windows_subsystem = "windows"
+)]
 
 // use tauri::{http, utils::config::parse};
 
@@ -17,10 +20,16 @@ use crate::{
 fn main() {
     // bittorrent_lib::run();
 
-    // Get abs path of main file
-    let exe_path = std::env::current_exe().expect("Failed to get current exe path");
-    let exe_dir = exe_path.parent().expect("Failed to get parent directory");
-    let pattern = exe_dir.join("*.torrent");
+    let search_dir = std::env::var("TORRENT_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            let exe_path = std::env::current_exe().expect("Failed to get current exe path");
+            exe_path
+                .parent()
+                .expect("Failed to get parent directory")
+                .to_path_buf()
+        });
+    let pattern = search_dir.join("*.torrent");
     println!("Searching for .torrent files in: {}", pattern.display());
 
     let path = glob::glob(pattern.to_str().unwrap())

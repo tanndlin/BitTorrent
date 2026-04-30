@@ -6,20 +6,21 @@ COPY Cargo.toml Cargo.lock ./
 
 # Build deps only using dummy src — this layer is cached until Cargo.toml/Cargo.lock changes
 RUN mkdir -p src && echo "fn main() {}" > src/main.rs && echo "" > src/lib.rs
-RUN cargo build --release
+RUN cargo build --release --no-default-features --bin bittorrent
 RUN rm -rf src
 
 # Copy real source and touch main.rs so cargo knows to recompile
 COPY src ./src
 RUN touch src/main.rs
-RUN cargo build --release
+RUN cargo build --release --no-default-features --bin bittorrent
 
 # ---------- runtime ----------
 FROM debian:trixie-slim
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /app/target/release/bittorrent /app/bittorrent
-COPY --from=builder /app/target/release/deps/libbittorrent* /
 
 EXPOSE 6881/tcp
 EXPOSE 6881/udp

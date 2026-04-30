@@ -26,5 +26,15 @@ services:
     build: src-tauri
     depends_on:
       - opentracker
+    environment:
+      - TORRENT_DIR=/torrents
     volumes:
       - ./docker/torrents:/torrents
+    develop:
+      watch:
+        - action: rebuild
+          path: ./src-tauri/src
+        - action: rebuild
+          path: ./src-tauri/Cargo.toml
+        - action: rebuild
+          path: ./src-tauri/Cargo.lock
