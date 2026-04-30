@@ -11,7 +11,7 @@ mod util;
 use crate::{
     bencoding::{decode, torrent::Torrent},
     connection::{Event, HTTPResponse, Peer, ToUrl, TrackerRequest, TrackerResponse},
-    peer::connect_to_peer,
+    peer::peer_protocol::connect_to_peer,
 };
 
 fn main() {

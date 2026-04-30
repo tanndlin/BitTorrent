@@ -1,7 +1,7 @@
 use std::{io::Write, net::TcpStream};
 
 use crate::{
-    peer::{PeerMessage, PeerMessageID},
+    peer::types::{PeerMessage, PeerMessageID},
     util::greedy_tcp_stream::{GreedyTcpStream, MessageParser},
 };
 
