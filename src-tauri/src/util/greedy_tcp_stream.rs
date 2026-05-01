@@ -46,11 +46,11 @@ impl<T> GreedyTcpStream<T> {
         }
     }
 
-    pub fn try_read_message(&mut self) -> Option<T> {
+    pub fn try_read_message(&mut self) -> Result<Option<T>, std::io::Error> {
         // First check already-buffered bytes
         if let Some((message, bytes_used)) = (self.parser)(&self.bytes_left) {
             self.bytes_left.drain(0..bytes_used);
-            return Some(message);
+            return Ok(Some(message));
         }
 
         // Try a non-blocking read
@@ -60,22 +60,25 @@ impl<T> GreedyTcpStream<T> {
 
         let mut buf = [0u8; 32768];
         match self.stream.read(&mut buf) {
-            Ok(0) => panic!("Connection closed"),
+            Ok(0) => Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Connection closed... read 0 bytes",
+            )),
             Ok(n) => {
                 self.bytes_left.extend_from_slice(&buf[..n]);
                 if let Some((message, bytes_used)) = (self.parser)(&self.bytes_left) {
                     self.bytes_left.drain(0..bytes_used);
-                    return Some(message);
+                    return Ok(Some(message));
                 }
-                None
+                Ok(None)
             }
             Err(ref e)
                 if e.kind() == std::io::ErrorKind::WouldBlock
                     || e.kind() == std::io::ErrorKind::TimedOut =>
             {
-                None
+                Ok(None)
             }
-            Err(e) => panic!("Read error: {}", e),
+            Err(e) => Err(e),
         }
     }
 }

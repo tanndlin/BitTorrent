@@ -11,10 +11,23 @@ mod connection;
 mod peer;
 mod util;
 
+use std::{
+    fs::create_dir_all,
+    io::Write,
+    sync::{Arc, Mutex},
+    thread,
+};
+
 use crate::{
-    bencoding::{decode, torrent::Torrent},
+    bencoding::{
+        decode,
+        torrent::{self, Torrent},
+    },
     connection::{Event, HTTPResponse, Peer, ToUrl, TrackerRequest, TrackerResponse},
-    peer::peer_protocol::connect_to_peer,
+    peer::{
+        peer_protocol::connect_to_peer,
+        types::{PieceProgress, TorrentProgress},
+    },
 };
 
 fn main() {
@@ -38,15 +51,15 @@ fn main() {
         .expect("No .torrent files found")
         .expect("Failed to read path");
     let content = std::fs::read(path).expect("Failed to read file");
-    let parsed = decode::parse_metainfo(&content);
+    let torrent = decode::parse_metainfo(&content);
 
-    dbg!(&parsed.trackers);
-    let http_trackers = parsed.trackers.iter().filter(|t| t.starts_with("http"));
+    dbg!(&torrent.trackers);
+    let http_trackers = torrent.trackers.iter().filter(|t| t.starts_with("http"));
 
     let peers: Vec<Peer> = http_trackers
         .into_iter()
         .flat_map(|tracker| {
-            let response = match get_peers_http(&parsed, tracker) {
+            let response = match get_peers_http(&torrent, tracker) {
                 Ok(res) => res,
                 Err(err) => {
                     println!("Error getting peers from tracker {}: {}", tracker, err);
@@ -84,20 +97,93 @@ fn main() {
         return;
     }
 
-    // let peer = &peers[0];
-    // println!("First peer IP: {}, Port: {}", peer.ip, peer.port);
-    // connect_to_peer(peer, &parsed);
+    let progress: Arc<Mutex<TorrentProgress>> = Arc::new(Mutex::new((&torrent).into()));
 
-    for peer in peers {
-        println!("Attempting to connect to peer: {}:{}", peer.ip, peer.port);
-        match connect_to_peer(&peer, &parsed) {
-            Ok(_) => println!("Successfully connected to peer: {}:{}", peer.ip, peer.port),
-            Err(err) => println!(
-                "Failed to connect to peer {}:{} - {}",
-                peer.ip, peer.port, err
-            ),
+    // Find all files in pieces directory
+    for entry in std::fs::read_dir("/pieces").unwrap_or_else(|_| {
+        create_dir_all("/pieces").expect("Failed to create pieces directory");
+        std::fs::read_dir("/pieces").expect("Failed to read pieces directory")
+    }) {
+        let entry = entry.expect("Failed to read directory entry");
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(filename) = path.file_stem() {
+                if let Some(piece_index) = filename.to_str().and_then(|s| s.parse::<u32>().ok()) {
+                    let data = std::fs::read(&path).expect("Failed to read piece file");
+                    // Make sure the piece data is the correct length
+                    let expected_length = torrent.get_piece_length(piece_index as usize);
+                    if data.len() as u32 != expected_length {
+                        println!(
+                            "Warning: Piece file {} has incorrect length (expected {}, got {})",
+                            path.display(),
+                            expected_length,
+                            data.len()
+                        );
+                        continue;
+                    }
+                    progress
+                        .lock()
+                        .unwrap()
+                        .pieces
+                        .insert(piece_index, PieceProgress::Completed(data));
+                }
+            }
         }
     }
+
+    println!(
+        "Found existing {}/{} pieces",
+        progress.lock().unwrap().pieces.len(),
+        torrent.info.pieces.len()
+    );
+
+    dbg!(&peers);
+
+    let torrent = Arc::new(torrent);
+    let mut threads = vec![];
+    for peer in peers {
+        println!("Attempting to connect to peer: {}:{}", peer.ip, peer.port);
+        let progress = Arc::clone(&progress);
+        let torrent = Arc::clone(&torrent);
+        threads.push(thread::spawn(move || {
+            match connect_to_peer(&peer, &torrent, progress) {
+                Ok(_) => println!("Successfully connected to peer: {}:{}", peer.ip, peer.port),
+                Err(err) => println!(
+                    "Failed to connect to peer {}:{} - {}",
+                    peer.ip, peer.port, err
+                ),
+            }
+        }));
+    }
+
+    // Wait for all threads to finish
+    for thread in threads {
+        thread.join().expect("Failed to join thread");
+    }
+
+    println!("Download complete! All pieces downloaded.");
+    let donwloads_dir = std::env::var("DOWNLOADS_DIR").unwrap_or_else(|_| "/downloads".to_string());
+    create_dir_all(&donwloads_dir).expect("Failed to create downloads directory");
+    println!("Saving file to downloads directory: {}", donwloads_dir);
+
+    // Build file from pieces
+    let mut output_file = std::fs::File::create(format!("{}/{}", donwloads_dir, torrent.info.name))
+        .expect("Failed to create output file");
+    for i in 0..torrent.info.pieces.len() {
+        let progress = progress.lock().unwrap();
+
+        let piece_data = progress
+            .pieces
+            .get(&(i as u32))
+            .expect("Missing piece data")
+            .get_final_data()
+            .expect("Piece data is incomplete");
+        output_file
+            .write_all(&piece_data)
+            .expect("Failed to write piece data to output file");
+    }
+
+    println!("File saved successfully!");
 }
 
 fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, String> {

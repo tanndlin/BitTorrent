@@ -30,7 +30,7 @@ impl PeerMessageStream {
         self.stream.stream.write_all(buf)
     }
 
-    pub fn try_read_message(&mut self) -> Option<PeerMessage> {
+    pub fn try_read_message(&mut self) -> Result<Option<PeerMessage>, std::io::Error> {
         self.stream.try_read_message()
     }
 }

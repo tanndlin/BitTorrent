@@ -22,7 +22,7 @@ fn encode_torrent(torrent: &Torrent) -> Vec<u8> {
     info.insert("name".to_string(), Value::Str(torrent.info.name.clone()));
     info.insert(
         "piece length".to_string(),
-        Value::Number(torrent.info.piece_length),
+        Value::Number(torrent.info.piece_length as i64),
     );
     info.insert(
         "pieces".to_string(),
@@ -146,7 +146,10 @@ pub fn info_to_value(info: &Info) -> Value {
     let mut map = HashMap::<String, Value>::new();
 
     map.insert("name".to_owned(), Value::Str(info.name.clone()));
-    map.insert("piece_length".to_owned(), Value::Number(info.piece_length));
+    map.insert(
+        "piece_length".to_owned(),
+        Value::Number(info.piece_length as i64),
+    );
     map.insert("pieces".to_owned(), Value::Hashes(info.pieces.clone()));
     if let Some(length) = info.length {
         map.insert("length".to_owned(), Value::Number(length));

@@ -47,7 +47,7 @@ pub fn parse_metainfo(content: &Vec<u8>) -> Torrent {
                     _ => panic!("info.name is not a string"),
                 };
                 let piece_length = match &info_map["piece length"] {
-                    Value::Number(n) => *n,
+                    Value::Number(n) => *n as u64,
                     _ => panic!("info.piece length is not a number"),
                 };
                 let pieces = match &info_map["pieces"] {
