@@ -151,9 +151,9 @@ pub fn connect_to_peer(
             .choose_multiple(&mut rand::rng(), 5);
 
         for piece_index in needed_pieces {
-            let torrent_progress = progress.lock().unwrap();
+            let mut torrent_progress = progress.lock().unwrap();
             if let PieceProgress::InProgress(piece_progress) =
-                torrent_progress.pieces.get(&piece_index).unwrap()
+                torrent_progress.pieces.get_mut(&piece_index).unwrap()
             {
                 let mut start = 0;
                 while start < torrent.get_piece_length(piece_index as usize) && inflight < 25 {
@@ -163,8 +163,8 @@ pub fn connect_to_peer(
                     //     start,
                     //     16 * 1024
                     // );
-                    let block_progress = piece_progress.data.get(&start).unwrap();
-                    if block_progress.inflight {
+                    let block_progress = piece_progress.data.get_mut(&start).unwrap();
+                    if block_progress.inflight || block_progress.data.is_some() {
                         start += 16 * 1024;
                         continue;
                     }
@@ -175,6 +175,10 @@ pub fn connect_to_peer(
                     peer_message_stream
                         .write_all(&Vec::from(&request_message))
                         .expect("Failed to send request message");
+
+                    // Mark block as inflight
+                    block_progress.inflight = true;
+
                     inflight += 1;
                     start += 16 * 1024;
                 }
@@ -275,24 +279,6 @@ fn handle_message(
                         inflight: false,
                         data: Some(block.to_vec()),
                     },
-                );
-
-                // Calculate the percentage of the piece that has been downloaded
-                let total_downloaded: u32 = piece_progress
-                    .data
-                    .values()
-                    .filter_map(|b| b.data.as_ref())
-                    .map(|d| d.len() as u32)
-                    .sum();
-                let percentage = (total_downloaded as f64 / piece_progress.length as f64) * 100.0;
-                println!(
-                    "Downloaded block for piece index: {:4}, begin: {:6}, block length: {:5}, total downloaded: {:7} / {:7} ({:.2}%)",
-                    index,
-                    begin,
-                    block.len(),
-                    total_downloaded,
-                    piece_progress.length,
-                    percentage
                 );
 
                 piece_progress.get_final_data()
