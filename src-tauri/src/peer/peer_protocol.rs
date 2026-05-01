@@ -65,7 +65,9 @@ pub fn connect_to_peer(
     for i in 0..torrent.info.pieces.len() {
         let byte_index = i / 8;
         let bit_index = 7 - (i % 8);
-        if progress.lock().unwrap().pieces.contains_key(&(i as u32)) {
+        if let PieceProgress::Completed(_) =
+            progress.lock().unwrap().pieces.get(&(i as u32)).unwrap()
+        {
             bitfield_payload[byte_index] |= 1 << bit_index;
         }
     }
@@ -97,11 +99,15 @@ pub fn connect_to_peer(
         .values()
         .any(|p| !matches!(p, PieceProgress::Completed(_)))
     {
-        println!("Checking for messages from peer...");
-
         match peer_message_stream.try_read_message() {
             Ok(Some(message)) => {
-                handle_message(&message, &mut is_choked, &mut bitfield, progress.clone());
+                handle_message(
+                    &message,
+                    &mut is_choked,
+                    &mut bitfield,
+                    progress.clone(),
+                    &mut inflight,
+                );
                 continue;
             }
             Ok(None) => {}
@@ -111,13 +117,17 @@ pub fn connect_to_peer(
             }
         }
 
-        println!("No messages from peer, checking if we can request pieces...");
-
         if !is_choked && bitfield.is_empty() {
             // Just wait for message
             println!("Peer is not choked but has no pieces, waiting for message...");
             let message = peer_message_stream.get_next_message();
-            handle_message(&message, &mut is_choked, &mut bitfield, progress.clone());
+            handle_message(
+                &message,
+                &mut is_choked,
+                &mut bitfield,
+                progress.clone(),
+                &mut inflight,
+            );
             continue;
         }
 
@@ -128,8 +138,6 @@ pub fn connect_to_peer(
         if is_choked {
             continue;
         }
-
-        println!("Peer is not choked and has pieces, checking for needed pieces...");
 
         // Choose 5 random pieces that the peer has and that we don't have
         let needed_pieces = (0..torrent.info.pieces.len() as u32)
@@ -142,16 +150,19 @@ pub fn connect_to_peer(
             })
             .choose_multiple(&mut rand::rng(), 5);
 
-        println!("Needed pieces: {:?}", needed_pieces);
-
         for piece_index in needed_pieces {
             let torrent_progress = progress.lock().unwrap();
             if let PieceProgress::InProgress(piece_progress) =
                 torrent_progress.pieces.get(&piece_index).unwrap()
             {
-                println!("Requesting piece index: {}", piece_index);
                 let mut start = 0;
-                while start < torrent.get_piece_length(piece_index as usize) && inflight < 5 {
+                while start < torrent.get_piece_length(piece_index as usize) && inflight < 25 {
+                    // println!(
+                    //     "Requesting piece index: {}, begin: {}, length: {}",
+                    //     piece_index,
+                    //     start,
+                    //     16 * 1024
+                    // );
                     let block_progress = piece_progress.data.get(&start).unwrap();
                     if block_progress.inflight {
                         start += 16 * 1024;
@@ -195,6 +206,7 @@ fn handle_message(
     is_choked: &mut bool,
     bitfield: &mut Vec<u8>,
     progress: Arc<Mutex<TorrentProgress>>,
+    inflight: &mut u32,
 ) {
     // println!("Message ID: {:?}, Length: {}", message.id, message.length);
 
@@ -243,12 +255,13 @@ fn handle_message(
             let index = u32::from_be_bytes(message.payload[0..4].try_into().unwrap());
             let begin = u32::from_be_bytes(message.payload[4..8].try_into().unwrap());
             let block = &message.payload[8..];
-            println!(
-                "Received piece index: {}, begin: {}, block length: {}",
-                index,
-                begin,
-                block.len()
-            );
+            // println!(
+            //     "Received piece index: {}, begin: {}, block length: {}",
+            //     index,
+            //     begin,
+            //     block.len()
+            // );
+            *inflight -= 1;
 
             let mut progress = progress.lock().unwrap();
             let final_data = if let Some(PieceProgress::InProgress(piece_progress)) =
@@ -263,6 +276,25 @@ fn handle_message(
                         data: Some(block.to_vec()),
                     },
                 );
+
+                // Calculate the percentage of the piece that has been downloaded
+                let total_downloaded: u32 = piece_progress
+                    .data
+                    .values()
+                    .filter_map(|b| b.data.as_ref())
+                    .map(|d| d.len() as u32)
+                    .sum();
+                let percentage = (total_downloaded as f64 / piece_progress.length as f64) * 100.0;
+                println!(
+                    "Downloaded block for piece index: {:4}, begin: {:6}, block length: {:5}, total downloaded: {:7} / {:7} ({:.2}%)",
+                    index,
+                    begin,
+                    block.len(),
+                    total_downloaded,
+                    piece_progress.length,
+                    percentage
+                );
+
                 piece_progress.get_final_data()
             } else {
                 println!(
@@ -273,6 +305,7 @@ fn handle_message(
             };
 
             if let Some(data) = final_data {
+                println!("Completed piece index: {}, writing to file", index);
                 progress
                     .pieces
                     .insert(index, PieceProgress::Completed(data));
