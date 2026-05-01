@@ -51,6 +51,9 @@ pub fn connect_to_peer(
     println!("Received handshake response: {:?}", handshake_response);
 
     let mut peer_message_stream = PeerMessageStream::new(stream);
+
+    // TODO: Create a peer state
+    // TODO: Randomly select pieces to request, but prioritize pieces that are rarer among peers / prioritize pieces one at a time to avoid sparsely completed pieces
     let mut is_choked = true;
     let mut bitfield: Vec<u8> = vec![];
     let mut inflight = 0u32;
