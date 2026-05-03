@@ -212,3 +212,22 @@ pub struct BlockProgress {
     pub inflight: bool,
     pub data: Option<Vec<u8>>,
 }
+
+pub struct PeerState {
+    pub is_choked: bool,
+    pub inflight: u32,
+    pub bitfield: Vec<u8>,
+}
+
+impl PeerState {
+    pub fn new(num_bitfield_bytes: usize) -> Self {
+        let mut is_choked = true;
+        let mut inflight = 0u32;
+        let mut bitfield: Vec<u8> = vec![0; num_bitfield_bytes];
+        PeerState {
+            is_choked,
+            inflight,
+            bitfield,
+        }
+    }
+}

@@ -5,7 +5,7 @@ use crate::{
     bencoding::{self, torrent::Torrent},
     connection::Peer,
     peer::types::{
-        BlockProgress, PeerHandshake, PeerMessage, PeerMessageID, PieceProgress, PieceProgressData,
+        BlockProgress, PeerHandshake, PeerMessage, PeerMessageID, PeerState, PieceProgress,
         TorrentProgress,
     },
     util::peer_message_stream::PeerMessageStream,
@@ -51,19 +51,12 @@ pub fn connect_to_peer(
 
     let mut peer_message_stream = PeerMessageStream::new(stream);
 
-    // TODO: Create a peer state
     // TODO: Randomly select pieces to request, but prioritize pieces that are rarer among peers / prioritize pieces one at a time to avoid sparsely completed pieces
-    let mut is_choked = true;
-    let mut bitfield: Vec<u8> = vec![];
-    let mut inflight = 0u32;
-    // Fill bitfield with 0s for all pieces
-    let num_bytes = torrent.info.pieces.len().div_ceil(8);
-    bitfield.resize(num_bytes, 0);
+    let num_bitfield_bytes = torrent.info.pieces.len().div_ceil(8);
+    let mut peer_state = PeerState::new(num_bitfield_bytes);
 
     // Send my bitfield message
-    let num_bytes = torrent.info.pieces.len().div_ceil(8);
-    let mut bitfield_payload = vec![0u8; num_bytes];
-
+    let mut bitfield_payload = vec![0; num_bitfield_bytes];
     for i in 0..torrent.info.pieces.len() {
         let byte_index = i / 8;
         let bit_index = 7 - (i % 8);
@@ -103,13 +96,7 @@ pub fn connect_to_peer(
     {
         match peer_message_stream.try_read_message() {
             Ok(Some(message)) => {
-                handle_message(
-                    &message,
-                    &mut is_choked,
-                    &mut bitfield,
-                    progress.clone(),
-                    &mut inflight,
-                );
+                handle_message(&message, &mut peer_state, progress.clone());
                 continue;
             }
             Ok(None) => {}
@@ -119,31 +106,21 @@ pub fn connect_to_peer(
             }
         }
 
-        if !is_choked && bitfield.is_empty() {
+        if !peer_state.is_choked && peer_state.bitfield.is_empty() {
             // Just wait for message
             println!("Peer is not choked but has no pieces, waiting for message...");
             let message = peer_message_stream.get_next_message();
-            handle_message(
-                &message,
-                &mut is_choked,
-                &mut bitfield,
-                progress.clone(),
-                &mut inflight,
-            );
+            handle_message(&message, &mut peer_state, progress.clone());
             continue;
         }
 
-        if bitfield.is_empty() {
-            continue;
-        }
-
-        if is_choked {
+        if peer_state.bitfield.is_empty() || peer_state.is_choked {
             continue;
         }
 
         // Choose 5 random pieces that the peer has and that we don't have
         let needed_pieces = (0..torrent.info.pieces.len() as u32)
-            .filter(|&i| bitfield_contains_piece(&bitfield, i))
+            .filter(|&i| bitfield_contains_piece(&peer_state.bitfield, i))
             .filter(|&i| {
                 !matches!(
                     progress.lock().unwrap().pieces.get(&i),
@@ -158,7 +135,9 @@ pub fn connect_to_peer(
                 torrent_progress.pieces.get_mut(&piece_index).unwrap()
             {
                 let mut start = 0;
-                while start < torrent.get_piece_length(piece_index as usize) && inflight < 25 {
+                while start < torrent.get_piece_length(piece_index as usize)
+                    && peer_state.inflight < 25
+                {
                     // println!(
                     //     "Requesting piece index: {}, begin: {}, length: {}",
                     //     piece_index,
@@ -181,7 +160,7 @@ pub fn connect_to_peer(
                     // Mark block as inflight
                     block_progress.inflight = true;
 
-                    inflight += 1;
+                    peer_state.inflight += 1;
                     start += 16 * 1024;
                 }
             }
@@ -214,10 +193,8 @@ fn write_piece_to_file(progress: &TorrentProgress, piece_index: u32) {
 
 fn handle_message(
     message: &PeerMessage,
-    is_choked: &mut bool,
-    bitfield: &mut Vec<u8>,
+    peer_state: &mut PeerState,
     progress: Arc<Mutex<TorrentProgress>>,
-    inflight: &mut u32,
 ) {
     // println!("Message ID: {:?}, Length: {}", message.id, message.length);
 
@@ -227,11 +204,11 @@ fn handle_message(
         }
         PeerMessageID::Choke => {
             println!("Peer choked us");
-            *is_choked = true;
+            peer_state.is_choked = true;
         }
         PeerMessageID::Unchoke => {
             println!("Peer unchoked us");
-            *is_choked = false;
+            peer_state.is_choked = false;
         }
         PeerMessageID::Interested => {
             println!("Peer is interested");
@@ -245,13 +222,13 @@ fn handle_message(
 
             let byte_index = (piece_index / 8) as usize;
             let bit_index = 7 - (piece_index % 8);
-            if byte_index < bitfield.len() {
-                bitfield[byte_index] |= 1 << bit_index;
+            if byte_index < peer_state.bitfield.len() {
+                peer_state.bitfield[byte_index] |= 1 << bit_index;
             }
         }
         PeerMessageID::Bitfield => {
             println!("Received bitfield: {:?}", message.payload);
-            *bitfield = message.payload.clone();
+            peer_state.bitfield = message.payload.clone();
         }
         PeerMessageID::Request => {
             let index = u32::from_be_bytes(message.payload[0..4].try_into().unwrap());
@@ -272,7 +249,7 @@ fn handle_message(
             //     begin,
             //     block.len()
             // );
-            *inflight -= 1;
+            peer_state.inflight -= 1;
 
             let mut progress = progress.lock().unwrap();
             let final_data = if let Some(PieceProgress::InProgress(piece_progress)) =
