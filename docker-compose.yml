@@ -40,3 +40,63 @@ services:
     - ./docker/qbittorrent1/config:/config
     - ./docker/qbittorrent1/torrents:/torrents
     - ./docker/qbittorrent-base/downloads:/downloads
+  qbittorrent-2:
+    container_name: qbittorrent-2
+    environment:
+    - PUID=1000
+    - PGID=1000
+    - WEBUI_PORT=8081
+    image: linuxserver/qbittorrent:latest
+    ports:
+    - 8081:8081
+    - 6882:6882
+    - 6882:6882/udp
+    volumes:
+    - ./docker/qbittorrent2/config:/config
+    - ./docker/qbittorrent2/torrents:/torrents
+    - ./docker/qbittorrent-base/downloads:/downloads
+  qbittorrent-3:
+    container_name: qbittorrent-3
+    environment:
+    - PUID=1000
+    - PGID=1000
+    - WEBUI_PORT=8082
+    image: linuxserver/qbittorrent:latest
+    ports:
+    - 8082:8082
+    - 6883:6883
+    - 6883:6883/udp
+    volumes:
+    - ./docker/qbittorrent3/config:/config
+    - ./docker/qbittorrent3/torrents:/torrents
+    - ./docker/qbittorrent-base/downloads:/downloads
+  qbittorrent-4:
+    container_name: qbittorrent-4
+    environment:
+    - PUID=1000
+    - PGID=1000
+    - WEBUI_PORT=8083
+    image: linuxserver/qbittorrent:latest
+    ports:
+    - 8083:8083
+    - 6884:6884
+    - 6884:6884/udp
+    volumes:
+    - ./docker/qbittorrent4/config:/config
+    - ./docker/qbittorrent4/torrents:/torrents
+    - ./docker/qbittorrent-base/downloads:/downloads
+  qbittorrent-5:
+    container_name: qbittorrent-5
+    environment:
+    - PUID=1000
+    - PGID=1000
+    - WEBUI_PORT=8084
+    image: linuxserver/qbittorrent:latest
+    ports:
+    - 8084:8084
+    - 6885:6885
+    - 6885:6885/udp
+    volumes:
+    - ./docker/qbittorrent5/config:/config
+    - ./docker/qbittorrent5/torrents:/torrents
+    - ./docker/qbittorrent-base/downloads:/downloads

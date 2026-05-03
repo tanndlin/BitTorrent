@@ -17,6 +17,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+const MAX_INFLIGHT_REQUESTS: u32 = 200;
+
 pub fn connect_to_peer(
     peer: &Peer,
     torrent: &Torrent,
@@ -51,7 +53,6 @@ pub fn connect_to_peer(
 
     let mut peer_message_stream = PeerMessageStream::new(stream);
 
-    // TODO: Randomly select pieces to request, but prioritize pieces that are rarer among peers / prioritize pieces one at a time to avoid sparsely completed pieces
     let num_bitfield_bytes = torrent.info.pieces.len().div_ceil(8);
     let mut peer_state = PeerState::new(num_bitfield_bytes);
 
@@ -126,17 +127,24 @@ pub fn connect_to_peer(
                     progress.lock().unwrap().pieces.get(&i),
                     Some(PieceProgress::Completed(_))
                 )
-            })
-            .choose_multiple(&mut rand::rng(), 5);
+            });
 
-        for piece_index in needed_pieces {
+        while peer_state.requested_pieces.len() < 2 {
+            if let Some(piece_index) = needed_pieces.clone().choose(&mut rand::rng()) {
+                peer_state.requested_pieces.push(piece_index);
+            } else {
+                break;
+            }
+        }
+
+        for piece_index in &peer_state.requested_pieces.clone() {
             let mut torrent_progress = progress.lock().unwrap();
             if let PieceProgress::InProgress(piece_progress) =
-                torrent_progress.pieces.get_mut(&piece_index).unwrap()
+                torrent_progress.pieces.get_mut(piece_index).unwrap()
             {
                 let mut start = 0;
-                while start < torrent.get_piece_length(piece_index as usize)
-                    && peer_state.inflight < 25
+                while start < torrent.get_piece_length(*piece_index as usize)
+                    && peer_state.inflight < MAX_INFLIGHT_REQUESTS
                 {
                     // println!(
                     //     "Requesting piece index: {}, begin: {}, length: {}",
@@ -151,7 +159,7 @@ pub fn connect_to_peer(
                     }
 
                     let request_message =
-                        PeerMessage::create_request(piece_index, start, block_progress.length);
+                        PeerMessage::create_request(*piece_index, start, block_progress.length);
 
                     peer_message_stream
                         .write_all(&Vec::from(&request_message))
@@ -266,7 +274,11 @@ fn handle_message(
                 );
 
                 match piece_progress.get_final_data() {
-                    Ok(Some(data)) => Some(data),
+                    Ok(Some(data)) => {
+                        // Remove the piece from requested pieces
+                        peer_state.requested_pieces.retain(|&i| i != index);
+                        Some(data)
+                    }
                     Ok(None) => None,
                     Err(e) => {
                         piece_progress.reset();
@@ -286,7 +298,7 @@ fn handle_message(
             };
 
             if let Some(data) = final_data {
-                println!("Completed piece index: {}, writing to file", index);
+                // println!("Completed piece index: {}, writing to file", index);
                 progress
                     .pieces
                     .insert(index, PieceProgress::Completed(data));

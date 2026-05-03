@@ -217,17 +217,19 @@ pub struct PeerState {
     pub is_choked: bool,
     pub inflight: u32,
     pub bitfield: Vec<u8>,
+    pub requested_pieces: Vec<u32>,
 }
 
 impl PeerState {
     pub fn new(num_bitfield_bytes: usize) -> Self {
-        let mut is_choked = true;
-        let mut inflight = 0u32;
-        let mut bitfield: Vec<u8> = vec![0; num_bitfield_bytes];
+        let is_choked = true;
+        let inflight = 0u32;
+        let bitfield: Vec<u8> = vec![0; num_bitfield_bytes];
         PeerState {
             is_choked,
             inflight,
             bitfield,
+            requested_pieces: vec![],
         }
     }
 }

@@ -55,7 +55,7 @@ impl<T> GreedyTcpStream<T> {
 
         // Try a non-blocking read
         self.stream
-            .set_read_timeout(Some(std::time::Duration::from_millis(100)))
+            .set_read_timeout(Some(std::time::Duration::from_millis(1)))
             .unwrap();
 
         let mut buf = [0u8; 32768];

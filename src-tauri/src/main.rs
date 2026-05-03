@@ -56,6 +56,8 @@ fn main() {
     dbg!(&torrent.trackers);
     let http_trackers = torrent.trackers.iter().filter(|t| t.starts_with("http"));
 
+    let start_time = std::time::Instant::now();
+
     let peers: Vec<Peer> = http_trackers
         .into_iter()
         .flat_map(|tracker| {
@@ -161,7 +163,12 @@ fn main() {
         thread.join().expect("Failed to join thread");
     }
 
-    println!("Download complete! All pieces downloaded.");
+    let end_time = std::time::Instant::now();
+
+    println!(
+        "Download complete! Time taken: {:.2?}",
+        end_time.duration_since(start_time)
+    );
     let donwloads_dir = std::env::var("DOWNLOADS_DIR").unwrap_or_else(|_| "/downloads".to_string());
     create_dir_all(&donwloads_dir).expect("Failed to create downloads directory");
     println!("Saving file to downloads directory: {}", donwloads_dir);
