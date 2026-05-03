@@ -29,61 +29,8 @@ pub fn connect_to_peer(
     let peer = format!("{}:{}", peer.ip, peer.port);
     println!("{} - Connected", peer);
 
-    let mut reserved = [0; 8];
-    reserved[5] |= 0x10;
-
-    let handshake_request = PeerHandshake {
-        pstr: "BitTorrent protocol".to_owned(),
-        reserved,
-        info_hash: torrent.info_hash,
-        peer_id: *b"-TR2940-fuckmek6wWLc",
-    };
-
-    let handshake_bytes = Vec::from(&handshake_request);
-    println!("{} - Sending handshake: {:?}", peer, handshake_bytes);
-    stream
-        .write_all(&handshake_bytes)
-        .expect("Failed to send handshake");
-
-    let mut response_buf = [0; 68];
-    stream
-        .read_exact(&mut response_buf)
-        .map_err(|e| format!("{} - Failed to read handshake response: {}", peer, e))?;
-    let handshake_response = PeerHandshake::from(response_buf);
-    println!(
-        "{} - Received handshake response: {:?}",
-        peer, handshake_response
-    );
-
     let mut peer_message_stream = PeerMessageStream::new(stream);
-
-    let num_bitfield_bytes = torrent.info.pieces.len().div_ceil(8);
-    let mut peer_state = PeerState::new(peer, num_bitfield_bytes);
-
-    // Send my bitfield message
-    let mut bitfield_payload = vec![0; num_bitfield_bytes];
-    for i in 0..torrent.info.pieces.len() {
-        let byte_index = i / 8;
-        let bit_index = 7 - (i % 8);
-        if let PieceProgress::Completed(_) =
-            progress.lock().unwrap().pieces.get(&(i as u32)).unwrap()
-        {
-            bitfield_payload[byte_index] |= 1 << bit_index;
-        }
-    }
-    let bitfield_message = PeerMessage {
-        id: PeerMessageID::Bitfield,
-        length: (1 + bitfield_payload.len()) as u32,
-        payload: bitfield_payload,
-    };
-    let bitfield_bytes = Vec::from(&bitfield_message);
-    println!(
-        "Sending bitfield message of length: {:?}",
-        bitfield_bytes.len()
-    );
-    peer_message_stream
-        .write_all(&bitfield_bytes)
-        .expect("Failed to send bitfield message");
+    let mut peer_state = handle_handshake(torrent, &progress, &mut peer_message_stream, peer)?;
 
     let interested_message = PeerMessage::create_interested();
     let interested_bytes = Vec::from(&interested_message);
@@ -183,6 +130,65 @@ pub fn connect_to_peer(
     drop(peer_message_stream);
     println!("Finished downloading all pieces, closing connection to peer");
     Ok(())
+}
+
+fn handle_handshake(
+    torrent: &Torrent,
+    progress: &Arc<Mutex<TorrentProgress>>,
+    peer_message_stream: &mut PeerMessageStream,
+    peer: String,
+) -> Result<PeerState, String> {
+    let mut reserved = [0; 8];
+    reserved[5] |= 0x10;
+    let handshake_request = PeerHandshake {
+        pstr: "BitTorrent protocol".to_owned(),
+        reserved,
+        info_hash: torrent.info_hash,
+        peer_id: *b"-TR2940-fuckmek6wWLc",
+    };
+    let handshake_bytes = Vec::from(&handshake_request);
+    println!("{} - Sending handshake: {:?}", peer, handshake_bytes);
+    peer_message_stream
+        .write_all(&handshake_bytes)
+        .expect("Failed to send handshake");
+    let mut response_buf = [0; 68];
+    peer_message_stream
+        .stream
+        .stream
+        .read_exact(&mut response_buf)
+        .map_err(|e| format!("{} - Failed to read handshake response: {}", peer, e))?;
+    let handshake_response = PeerHandshake::from(response_buf);
+    println!(
+        "{} - Received handshake response: {:?}",
+        peer, handshake_response
+    );
+
+    let num_bitfield_bytes = torrent.info.pieces.len().div_ceil(8);
+    let peer_state = PeerState::new(peer, num_bitfield_bytes);
+    let mut bitfield_payload = vec![0; num_bitfield_bytes];
+    for i in 0..torrent.info.pieces.len() {
+        let byte_index = i / 8;
+        let bit_index = 7 - (i % 8);
+        if let PieceProgress::Completed(_) =
+            progress.lock().unwrap().pieces.get(&(i as u32)).unwrap()
+        {
+            bitfield_payload[byte_index] |= 1 << bit_index;
+        }
+    }
+    let bitfield_message = PeerMessage {
+        id: PeerMessageID::Bitfield,
+        length: (1 + bitfield_payload.len()) as u32,
+        payload: bitfield_payload,
+    };
+    let bitfield_bytes = Vec::from(&bitfield_message);
+    println!(
+        "Sending bitfield message of length: {:?}",
+        bitfield_bytes.len()
+    );
+    peer_message_stream
+        .write_all(&bitfield_bytes)
+        .expect("Failed to send bitfield message");
+    Ok(peer_state)
 }
 
 fn write_piece_to_file(progress: &TorrentProgress, piece_index: u32) {
