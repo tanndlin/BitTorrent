@@ -106,8 +106,8 @@ pub struct TrackerResponseGood {
     pub interval: u32,
     pub min_interval: Option<u32>,
     pub tracker_id: Option<String>,
-    pub complete: u32,
-    pub incomplete: u32,
+    pub complete: Option<u32>,
+    pub incomplete: Option<u32>,
     pub peers: Vec<Peer>,
 }
 
@@ -163,15 +163,15 @@ impl HTTPResponse for TrackerResponse {
             };
 
             let complete = if let Some(Value::Number(n)) = map.get("complete") {
-                *n as u32
+                Some(*n as u32)
             } else {
-                panic!("No complete in response");
+                None
             };
 
             let incomplete = if let Some(Value::Number(n)) = map.get("incomplete") {
-                *n as u32
+                Some(*n as u32)
             } else {
-                panic!("No incomplete in response");
+                None
             };
 
             let peers = if let Value::Peers(s) = &map["peers"] {

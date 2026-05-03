@@ -78,8 +78,8 @@ fn main() {
 
             let response = response.success.expect("No success response from tracker");
             println!("Interval: {}", response.interval);
-            println!("Leechers: {}", response.incomplete);
-            println!("Seeders: {}", response.complete);
+            println!("Leechers: {}", response.incomplete.unwrap_or(0));
+            println!("Seeders: {}", response.complete.unwrap_or(0));
             println!("Peers: {:?}", response.peers);
 
             if response.peers.is_empty() {
