@@ -26,7 +26,8 @@ pub fn connect_to_peer(
 ) -> Result<(), String> {
     let mut stream = TcpStream::connect((peer.ip, peer.port))
         .map_err(|e| format!("Failed to connect to peer {}: {}", peer.ip, e))?;
-    println!("Connected to peer: {:?}", stream);
+    let peer = format!("{}:{}", peer.ip, peer.port);
+    println!("{} - Connected", peer);
 
     let mut reserved = [0; 8];
     reserved[5] |= 0x10;
@@ -39,7 +40,7 @@ pub fn connect_to_peer(
     };
 
     let handshake_bytes = Vec::from(&handshake_request);
-    println!("Sending handshake: {:?}", handshake_bytes);
+    println!("{} - Sending handshake: {:?}", peer, handshake_bytes);
     stream
         .write_all(&handshake_bytes)
         .expect("Failed to send handshake");
@@ -47,14 +48,17 @@ pub fn connect_to_peer(
     let mut response_buf = [0; 68];
     stream
         .read_exact(&mut response_buf)
-        .expect("Failed to read handshake response");
+        .map_err(|e| format!("{} - Failed to read handshake response: {}", peer, e))?;
     let handshake_response = PeerHandshake::from(response_buf);
-    println!("Received handshake response: {:?}", handshake_response);
+    println!(
+        "{} - Received handshake response: {:?}",
+        peer, handshake_response
+    );
 
     let mut peer_message_stream = PeerMessageStream::new(stream);
 
     let num_bitfield_bytes = torrent.info.pieces.len().div_ceil(8);
-    let mut peer_state = PeerState::new(num_bitfield_bytes);
+    let mut peer_state = PeerState::new(peer, num_bitfield_bytes);
 
     // Send my bitfield message
     let mut bitfield_payload = vec![0; num_bitfield_bytes];
@@ -211,22 +215,22 @@ fn handle_message(
             println!("Received keep-alive message");
         }
         PeerMessageID::Choke => {
-            println!("Peer choked us");
+            println!("{} - Choked us", peer_state.peer);
             peer_state.is_choked = true;
         }
         PeerMessageID::Unchoke => {
-            println!("Peer unchoked us");
+            println!("{} - Unchoked us", peer_state.peer);
             peer_state.is_choked = false;
         }
         PeerMessageID::Interested => {
-            println!("Peer is interested");
+            println!("{} - Is interested", peer_state.peer);
         }
         PeerMessageID::NotInterested => {
-            println!("Peer is not interested");
+            println!("{} - Is not interested", peer_state.peer);
         }
         PeerMessageID::Have => {
             let piece_index = u32::from_be_bytes(message.payload[0..4].try_into().unwrap());
-            println!("Peer has piece index: {}", piece_index);
+            println!("{} - Has piece index: {}", peer_state.peer, piece_index);
 
             let byte_index = (piece_index / 8) as usize;
             let bit_index = 7 - (piece_index % 8);
@@ -235,7 +239,10 @@ fn handle_message(
             }
         }
         PeerMessageID::Bitfield => {
-            println!("Received bitfield: {:?}", message.payload);
+            println!(
+                "{} - Received bitfield: {:?}",
+                peer_state.peer, message.payload
+            );
             peer_state.bitfield = message.payload.clone();
         }
         PeerMessageID::Request => {
@@ -252,7 +259,8 @@ fn handle_message(
             let begin = u32::from_be_bytes(message.payload[4..8].try_into().unwrap());
             let block = &message.payload[8..];
             // println!(
-            //     "Received piece index: {}, begin: {}, block length: {}",
+            //     "{} - Received piece index: {}, begin: {}, block length: {}",
+            //     peer_state.peer,
             //     index,
             //     begin,
             //     block.len()

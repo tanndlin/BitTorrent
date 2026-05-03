@@ -151,7 +151,7 @@ fn main() {
             match connect_to_peer(&peer, &torrent, progress) {
                 Ok(_) => println!("Successfully connected to peer: {}:{}", peer.ip, peer.port),
                 Err(err) => println!(
-                    "Failed to connect to peer {}:{} - {}",
+                    "Error communicating with peer {}:{} - {}",
                     peer.ip, peer.port, err
                 ),
             }
