@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use sha1::{Digest, Sha1};
+
 use crate::bencoding::torrent::Torrent;
 
 #[derive(Debug)]
@@ -135,6 +137,7 @@ impl From<&Torrent> for TorrentProgress {
                         index: i as u32,
                         length: torrent.get_piece_length(i),
                         data,
+                        expected_hash: torrent.info.pieces[i],
                     }),
                 )
             })
@@ -150,9 +153,9 @@ pub enum PieceProgress {
 }
 
 impl PieceProgress {
-    pub fn get_final_data(&self) -> Option<Vec<u8>> {
+    pub fn get_final_data(&self) -> Result<Option<Vec<u8>>, String> {
         match self {
-            PieceProgress::Completed(data) => Some(data.clone()),
+            PieceProgress::Completed(data) => Ok(Some(data.clone())),
             PieceProgress::InProgress(progress) => progress.get_final_data(),
         }
     }
@@ -162,23 +165,44 @@ pub struct PieceProgressData {
     pub index: u32,
     pub length: u32,
     pub data: HashMap<u32, BlockProgress>,
+    pub expected_hash: [u8; 20],
 }
 
 impl PieceProgressData {
-    pub fn get_final_data(&self) -> Option<Vec<u8>> {
+    pub fn get_final_data(&self) -> Result<Option<Vec<u8>>, String> {
         let mut final_data = vec![0; self.length as usize];
 
         let keys_sorted: Vec<u32> = self.data.keys().cloned().collect();
         for begin in keys_sorted {
             let block_progress = self.data.get(&begin).unwrap();
             if block_progress.data.is_none() {
-                return None;
+                return Ok(None);
             }
+
             let block_data = block_progress.data.as_ref().unwrap();
             final_data[begin as usize..(begin + block_progress.length) as usize]
                 .copy_from_slice(block_data);
         }
-        Some(final_data)
+
+        // Chech hash
+        let mut hasher = Sha1::new();
+        hasher.update(&final_data);
+        let piece_hash: [u8; 20] = hasher.finalize().into();
+        if piece_hash == self.expected_hash {
+            return Ok(Some(final_data));
+        }
+
+        Err(format!(
+            "Hash mismatch for piece {}: expected {:x?}, got {:x?}",
+            self.index, self.expected_hash, piece_hash
+        ))
+    }
+
+    pub fn reset(&mut self) {
+        self.data.iter_mut().for_each(|(_, block)| {
+            block.inflight = false;
+            block.data = None;
+        });
     }
 }
 

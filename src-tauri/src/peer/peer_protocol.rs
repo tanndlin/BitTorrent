@@ -1,5 +1,4 @@
 use rand::seq::IteratorRandom;
-use sha1::{Digest, Sha1};
 // use tauri::http::request;
 
 use crate::{
@@ -204,8 +203,13 @@ fn write_piece_to_file(progress: &TorrentProgress, piece_index: u32) {
         .truncate(true)
         .open(format!("/pieces/{}.bin", piece_index))
         .expect("Failed to open file");
-    file.write_all(&progress.pieces[&piece_index].get_final_data().unwrap())
-        .expect("Failed to write piece to file");
+    file.write_all(
+        &progress.pieces[&piece_index]
+            .get_final_data()
+            .unwrap()
+            .unwrap(),
+    )
+    .expect("Failed to write piece to file");
 }
 
 fn handle_message(
@@ -284,7 +288,18 @@ fn handle_message(
                     },
                 );
 
-                piece_progress.get_final_data()
+                match piece_progress.get_final_data() {
+                    Ok(Some(data)) => Some(data),
+                    Ok(None) => None,
+                    Err(e) => {
+                        piece_progress.reset();
+                        println!(
+                            "Error validating piece {}: {}, resetting progress",
+                            index, e
+                        );
+                        None
+                    }
+                }
             } else {
                 println!(
                     "Received piece data for index {} that is not in progress",

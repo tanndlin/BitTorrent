@@ -177,6 +177,7 @@ fn main() {
             .get(&(i as u32))
             .expect("Missing piece data")
             .get_final_data()
+            .expect("Piece failed hash check")
             .expect("Piece data is incomplete");
         output_file
             .write_all(&piece_data)
