@@ -24,7 +24,7 @@ pub fn connect_to_peer(
     torrent: &Torrent,
     progress: Arc<Mutex<TorrentProgress>>,
 ) -> Result<(), String> {
-    let mut stream = TcpStream::connect((peer.ip, peer.port))
+    let stream = TcpStream::connect((peer.ip, peer.port))
         .map_err(|e| format!("Failed to connect to peer {}: {}", peer.ip, e))?;
     let peer = format!("{}:{}", peer.ip, peer.port);
     println!("{} - Connected", peer);
@@ -344,7 +344,7 @@ fn handle_message(
             println!("Extension ID: {} ({})", extension_id, extension_id_str);
 
             let dictionary =
-                bencoding::decode::parse_dictionary(&message.payload[1..], &mut 0usize);
+                bencoding::decode::decode_dictionary(&message.payload[1..], &mut 0usize);
             println!("Decoded extension message: {:?}", dictionary);
         }
     }

@@ -12,7 +12,7 @@ pub static COLON: u8 = b':';
 
 #[derive(Serialize, Deserialize)]
 pub struct Torrent {
-    pub trackers: Vec<String>,
+    pub trackers: Vec<Tracker>,
     pub info: Info,
     pub info_hash: [u8; 20],
 }
@@ -57,5 +57,22 @@ impl Torrent {
         } else {
             piece_length
         } as u32)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum Tracker {
+    Http(String),
+    Udp(String),
+    Dht(String),
+}
+
+impl From<Tracker> for String {
+    fn from(tracker: Tracker) -> Self {
+        match tracker {
+            Tracker::Http(url) => url,
+            Tracker::Udp(url) => url,
+            Tracker::Dht(url) => url,
+        }
     }
 }

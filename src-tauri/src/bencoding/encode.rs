@@ -13,7 +13,8 @@ fn encode_torrent(torrent: &Torrent) -> Vec<u8> {
     let mut ret = HashMap::<String, Value>::new();
     let mut trackers = Vec::<Value>::new();
     for tracker in &torrent.trackers {
-        trackers.push(Value::Str(tracker.clone()));
+        let tracker_str = tracker.clone().into();
+        trackers.push(Value::Str(tracker_str));
     }
 
     ret.insert("annouce-list".to_string(), Value::List(trackers));
@@ -76,7 +77,7 @@ pub fn encode_value(value: Value) -> Vec<u8> {
     }
 }
 
-fn encode_dictionary(dict: HashMap<String, Value>) -> Vec<u8> {
+pub fn encode_dictionary(dict: HashMap<String, Value>) -> Vec<u8> {
     let mut ret = Vec::<u8>::new();
     ret.push(DICTIONARY_START);
 

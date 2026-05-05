@@ -8,6 +8,7 @@
 
 mod bencoding;
 mod connection;
+mod dht;
 mod peer;
 mod util;
 
@@ -21,9 +22,10 @@ use std::{
 use crate::{
     bencoding::{
         decode,
-        torrent::{self, Torrent},
+        torrent::{Torrent, Tracker},
     },
     connection::{Event, HTTPResponse, Peer, ToUrl, TrackerRequest, TrackerResponse},
+    dht::dht_node::DHTNode,
     peer::{
         peer_protocol::connect_to_peer,
         types::{PieceProgress, TorrentProgress},
@@ -54,42 +56,9 @@ fn main() {
     let torrent = decode::parse_metainfo(&content);
 
     dbg!(&torrent.trackers);
-    let http_trackers = torrent.trackers.iter().filter(|t| t.starts_with("http"));
 
     let start_time = std::time::Instant::now();
-
-    let peers: Vec<Peer> = http_trackers
-        .into_iter()
-        .flat_map(|tracker| {
-            let response = match get_peers_http(&torrent, tracker) {
-                Ok(res) => res,
-                Err(err) => {
-                    println!("Error getting peers from tracker {}: {}", tracker, err);
-                    return vec![];
-                }
-            };
-
-            println!("Tracker Response: {:?}", response);
-
-            if let Some(err) = response.failure {
-                println!("Tracker failure reason: {:?}", err);
-                return vec![];
-            }
-
-            let response = response.success.expect("No success response from tracker");
-            println!("Interval: {}", response.interval);
-            println!("Leechers: {}", response.incomplete.unwrap_or(0));
-            println!("Seeders: {}", response.complete.unwrap_or(0));
-            println!("Peers: {:?}", response.peers);
-
-            if response.peers.is_empty() {
-                println!("No peers available from tracker");
-                return vec![];
-            }
-
-            response.peers
-        })
-        .collect();
+    let peers = get_peers_from_torrent(&torrent);
 
     println!("Total peers collected: {}", peers.len());
     dbg!(&peers);
@@ -192,6 +161,62 @@ fn main() {
     }
 
     println!("File saved successfully!");
+}
+
+fn get_peers_from_torrent(torrent: &Torrent) -> Vec<Peer> {
+    let http_trackers = torrent
+        .trackers
+        .iter()
+        .filter(|t| matches!(t, Tracker::Http(_)))
+        .map(|t| String::from(t.clone()))
+        .collect::<Vec<_>>();
+    if http_trackers.is_empty() {
+        return get_peers_dht(
+            torrent
+                .trackers
+                .iter()
+                .map(|t| String::from(t.clone()))
+                .collect(),
+        );
+    }
+
+    http_trackers
+        .into_iter()
+        .flat_map(|tracker| {
+            let response = match get_peers_http(torrent, &tracker) {
+                Ok(res) => res,
+                Err(err) => {
+                    println!("Error getting peers from tracker {}: {}", tracker, err);
+                    return vec![];
+                }
+            };
+
+            println!("Tracker Response: {:?}", response);
+
+            if let Some(err) = response.failure {
+                println!("Tracker failure reason: {:?}", err);
+                return vec![];
+            }
+
+            let response = response.success.expect("No success response from tracker");
+            println!("Interval: {}", response.interval);
+            println!("Leechers: {}", response.incomplete.unwrap_or(0));
+            println!("Seeders: {}", response.complete.unwrap_or(0));
+            println!("Peers: {:?}", response.peers);
+
+            if response.peers.is_empty() {
+                println!("No peers available from tracker");
+                return vec![];
+            }
+
+            response.peers
+        })
+        .collect()
+}
+
+fn get_peers_dht(trackers: Vec<String>) -> Vec<Peer> {
+    println!("No HTTP trackers found, falling back to DHT");
+    DHTNode::new(trackers).get_peers()
 }
 
 fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, String> {

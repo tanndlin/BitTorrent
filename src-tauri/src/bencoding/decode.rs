@@ -2,33 +2,53 @@ use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::collections::HashMap;
 
-use crate::bencoding::torrent::{self, File, Info, Torrent};
+use crate::bencoding::torrent::{self, File, Info, Torrent, Tracker};
 
 pub fn parse_metainfo(content: &Vec<u8>) -> Torrent {
-    let parsed = parse_dictionary(content, &mut 0);
+    let parsed = decode_dictionary(content, &mut 0);
     let dict = match parsed {
         Value::Dict(map) => map,
         _ => panic!("metainfo is not a dictionary"),
     };
     // print_map(&dict);
 
-    let trackers = if let Some(Value::List(announce_list)) = dict.get("announce-list") {
+    let mut trackers = if let Some(Value::List(announce_list)) = dict.get("announce-list") {
         let mut trackers = Vec::new();
         for tier in announce_list {
             if let Value::List(tier_list) = tier {
                 for url in tier_list {
                     if let Value::Str(s) = url {
-                        trackers.push(s.clone());
+                        trackers.push(match s.starts_with("http") {
+                            true => Tracker::Http(s.clone()),
+                            false => Tracker::Udp(s.clone()),
+                        });
                     }
                 }
             }
         }
         trackers
     } else if let Some(Value::Str(announce)) = dict.get("announce") {
-        vec![announce.clone()]
+        vec![match announce.starts_with("http") {
+            true => Tracker::Http(announce.clone()),
+            false => Tracker::Udp(announce.clone()),
+        }]
     } else {
         vec![]
     };
+
+    // Look for "nodes"
+    if let Some(Value::List(nodes)) = dict.get("nodes") {
+        for node in nodes {
+            if let Value::List(node_info) = node {
+                if node_info.len() == 2 {
+                    if let (Value::Str(host), Value::Number(port)) = (&node_info[0], &node_info[1])
+                    {
+                        trackers.push(Tracker::Dht(format!("{}:{}", host, port)));
+                    }
+                }
+            }
+        }
+    }
 
     let info_hash = get_info_hash(content, 0);
     // Print as a hex string
@@ -115,7 +135,7 @@ pub enum Value {
     Peers(Vec<[u8; 6]>),
 }
 
-pub fn parse_dictionary(content: &[u8], index: &mut usize) -> Value {
+pub fn decode_dictionary(content: &[u8], index: &mut usize) -> Value {
     assert!(content[*index] == torrent::DICTIONARY_START);
 
     *index += 1; // move past 'd'
@@ -149,7 +169,7 @@ fn parse_next(content: &[u8], index: &mut usize) -> Value {
     if content[*index] == torrent::INTEGER_START {
         parse_number(content, index)
     } else if content[*index] == torrent::DICTIONARY_START {
-        parse_dictionary(content, index)
+        decode_dictionary(content, index)
     } else if content[*index] == torrent::LIST_START {
         parse_list(content, index)
     } else {
@@ -308,7 +328,7 @@ pub fn get_info_hash(content: &Vec<u8>, start: usize) -> [u8; 20] {
                 // We found the "info" key, now hash the corresponding dictionary
                 let start = index - key.len() - 1; // include the length prefix and colon
                 let mut hasher = Sha1::new();
-                parse_dictionary(content, &mut index); // parse to move the index forward
+                decode_dictionary(content, &mut index); // parse to move the index forward
                 let end = index; // end of the "info" dictionary
 
                 hasher.update(&content[start..end]);
@@ -324,7 +344,7 @@ pub fn get_info_hash(content: &Vec<u8>, start: usize) -> [u8; 20] {
                 if value == "info" {
                     let start = index;
                     let mut hasher = Sha1::new();
-                    parse_dictionary(content, &mut index); // parse to move the index forward
+                    decode_dictionary(content, &mut index); // parse to move the index forward
                     let end = index; // end of the "info" dictionary
                     hasher.update(&content[start..end]);
                     return hasher.finalize().into();

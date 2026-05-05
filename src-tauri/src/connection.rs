@@ -3,7 +3,7 @@ use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 
 use url::Url;
 
-use crate::bencoding::decode::{parse_dictionary, Value};
+use crate::bencoding::decode::{decode_dictionary, Value};
 
 pub trait ToUrl {
     fn to_url_params(&self) -> String;
@@ -113,7 +113,7 @@ pub struct TrackerResponseGood {
 
 impl HTTPResponse for TrackerResponse {
     fn from_http_response(response: &[u8]) -> Self {
-        let map = match parse_dictionary(response, &mut 0) {
+        let map = match decode_dictionary(response, &mut 0) {
             Value::Dict(d) => d,
             _ => panic!("Expected a dictionary at the top level"),
         };
