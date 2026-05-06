@@ -1,5 +1,5 @@
 use super::super::bencoding::decode;
-use crate::{bencoding::decode::Value, connection::Peer};
+use crate::{bencoding::decode::Value, connection::Peer, dht::dht_node::DhtNode};
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -7,6 +7,7 @@ pub enum KRPCResponse {
     Ping(KRPCResponsePing),
     FindNode(KRPCResponseFindNode),
     GetPeers(KRPCResponseGetPeers),
+    KRPCError(KRPCError),
 }
 
 #[derive(Debug)]
@@ -19,7 +20,7 @@ pub struct KRPCResponsePing {
 pub struct KRPCResponseFindNode {
     transaction_id: [u8; 2],
     node_id: [u8; 20],
-    nodes: Vec<String>,
+    nodes: Vec<DhtNode>,
 }
 
 #[derive(Debug)]
@@ -27,15 +28,17 @@ pub struct KRPCResponseGetPeers {
     transaction_id: [u8; 2],
     node_id: [u8; 20],
     pub peers: Option<Vec<Peer>>,
-    pub nodes: Option<Vec<String>>,
+    pub nodes: Option<Vec<DhtNode>>,
     token: Option<Vec<u8>>,
 }
 
+#[derive(Debug)]
 pub struct KRPCError {
     error_code: KRPCErrorCode,
     error_message: String,
 }
 
+#[derive(Debug)]
 pub enum KRPCErrorCode {
     GenericError = 201,
     ServerError = 202,
@@ -52,6 +55,10 @@ impl TryFrom<&[u8]> for KRPCResponse {
             _ => panic!("Invalid KRPC response: expected dictionary"),
         };
 
+        if let Ok(err_response) = KRPCError::try_from(&decoded) {
+            return Ok(err_response.into());
+        }
+
         if let Ok(get_peers_response) = KRPCResponseGetPeers::try_from(&decoded) {
             return Ok(get_peers_response.into());
         }
@@ -64,7 +71,10 @@ impl TryFrom<&[u8]> for KRPCResponse {
             return Ok(ping_response.into());
         }
 
-        Err("Unknown KRPC response type".to_string())
+        Err(format!(
+            "Failed to parse KRPC response: no matching response type found. Decoded value: {:?}",
+            decoded
+        ))
     }
 }
 
@@ -129,12 +139,16 @@ impl TryFrom<&HashMap<String, Value>> for KRPCResponseFindNode {
                     .step_by(26)
                     .map(|i| {
                         let node_info = &b[i..i + 26];
+
+                        let node_id: [u8; 20] = node_info[0..20].try_into().unwrap();
                         let ip = format!(
                             "{}.{}.{}.{}",
-                            node_info[0], node_info[1], node_info[2], node_info[3]
+                            node_info[20], node_info[21], node_info[22], node_info[23]
                         );
                         let port = ((node_info[24] as u16) << 8) | (node_info[25] as u16);
-                        format!("{}:{}", ip, port)
+                        let location = format!("{}:{}", ip, port);
+
+                        DhtNode::new(Some(node_id), location)
                     })
                     .collect()
             }
@@ -186,6 +200,8 @@ impl TryFrom<&HashMap<String, Value>> for KRPCResponseGetPeers {
         };
 
         let nodes = match res.get("nodes") {
+            Some(Value::Bytes(b)) if b.is_empty() => None,
+            Some(Value::Str(s)) if s.is_empty() => None,
             Some(Value::Bytes(b)) => {
                 if b.len() % 26 != 0 {
                     return Err(
@@ -197,12 +213,16 @@ impl TryFrom<&HashMap<String, Value>> for KRPCResponseGetPeers {
                         .step_by(26)
                         .map(|i| {
                             let node_info = &b[i..i + 26];
+
+                            let node_id: [u8; 20] = node_info[0..20].try_into().unwrap();
                             let ip = format!(
                                 "{}.{}.{}.{}",
-                                node_info[0], node_info[1], node_info[2], node_info[3]
+                                node_info[20], node_info[21], node_info[22], node_info[23]
                             );
                             let port = ((node_info[24] as u16) << 8) | (node_info[25] as u16);
-                            format!("{}:{}", ip, port)
+                            let location = format!("{}:{}", ip, port);
+
+                            DhtNode::new(Some(node_id), location)
                         })
                         .collect(),
                 )
@@ -210,16 +230,50 @@ impl TryFrom<&HashMap<String, Value>> for KRPCResponseGetPeers {
             _ => None,
         };
 
-        if peers.is_none() && nodes.is_none() {
-            return Err("Response must contain either 'values' or 'nodes'".to_string());
-        }
-
         Ok(KRPCResponseGetPeers {
             transaction_id,
             node_id,
             peers,
             nodes,
             token,
+        })
+    }
+}
+
+impl TryFrom<&HashMap<String, Value>> for KRPCError {
+    type Error = String;
+
+    fn try_from(dict: &HashMap<String, Value>) -> Result<Self, Self::Error> {
+        let error_code = match dict.get("e") {
+            Some(Value::List(l)) if l.len() == 2 => match &l[0] {
+                Value::Number(n) => match *n as u16 {
+                    201 => KRPCErrorCode::GenericError,
+                    202 => KRPCErrorCode::ServerError,
+                    203 => KRPCErrorCode::ProtocolError,
+                    204 => KRPCErrorCode::MethodUnknown,
+                    _ => return Err("Unknown error code in KRPC error response".to_string()),
+                },
+                _ => return Err("Invalid error code format in KRPC error response".to_string()),
+            },
+            _ => return Err("Missing or invalid 'e' list in KRPC error response".to_string()),
+        };
+
+        let error_message = match dict.get("e").and_then(|e| match e {
+            Value::List(l) if l.len() == 2 => match &l[1] {
+                Value::Str(s) => Some(s.clone()),
+                _ => None,
+            },
+            _ => None,
+        }) {
+            Some(msg) => msg,
+            None => {
+                return Err("Missing or invalid error message in KRPC error response".to_string())
+            }
+        };
+
+        Ok(KRPCError {
+            error_code,
+            error_message,
         })
     }
 }
@@ -239,5 +293,11 @@ impl From<KRPCResponseFindNode> for KRPCResponse {
 impl From<KRPCResponseGetPeers> for KRPCResponse {
     fn from(get_peers: KRPCResponseGetPeers) -> Self {
         KRPCResponse::GetPeers(get_peers)
+    }
+}
+
+impl From<KRPCError> for KRPCResponse {
+    fn from(error: KRPCError) -> Self {
+        KRPCResponse::KRPCError(error)
     }
 }

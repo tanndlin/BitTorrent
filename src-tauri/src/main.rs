@@ -172,6 +172,7 @@ fn get_peers_from_torrent(torrent: &Torrent) -> Result<Vec<Peer>, String> {
         .collect::<Vec<_>>();
     if http_trackers.is_empty() {
         return get_peers_dht(
+            &torrent.info_hash,
             torrent
                 .trackers
                 .iter()
@@ -214,9 +215,9 @@ fn get_peers_from_torrent(torrent: &Torrent) -> Result<Vec<Peer>, String> {
         .collect())
 }
 
-fn get_peers_dht(trackers: Vec<String>) -> Result<Vec<Peer>, String> {
+fn get_peers_dht(info_hash: &[u8; 20], trackers: Vec<String>) -> Result<Vec<Peer>, String> {
     println!("No HTTP trackers found, falling back to DHT");
-    DhtClient::new(trackers).get_peers()
+    DhtClient::new(trackers).get_peers(info_hash)
 }
 
 fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, String> {
