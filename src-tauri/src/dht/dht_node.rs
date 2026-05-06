@@ -1,12 +1,16 @@
-use std::{collections::HashSet, net::UdpSocket, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    net::UdpSocket,
+    time::Duration,
+};
 
 use rand::Rng;
 
 use crate::{
     connection::Peer,
     dht::{
-        krpc_request::{KRPCRequestGetPeers, KRPCRequestPing},
-        krpc_response::{KRPCResponse, KRPCResponseGetPeers},
+        krpc_request::{KRPCRequest, KRPCRequestGetPeers, KRPCRequestPing},
+        krpc_response::KRPCResponse,
     },
 };
 
@@ -45,8 +49,46 @@ impl DhtClient {
         let mut peers = vec![];
         let mut queue: Vec<DhtNode> = self.nodes.clone();
         let mut visited = HashSet::new();
+        let mut pending = HashMap::new();
 
-        loop {
+        while !queue.is_empty() || !pending.is_empty() {
+            while let Some(res) = self.recv_response() {
+                let transaction_id = match &res {
+                    KRPCResponse::Ping(p) => p.transaction_id,
+                    KRPCResponse::GetPeers(gp) => gp.transaction_id,
+                    KRPCResponse::FindNode(fn_) => fn_.transaction_id,
+                    KRPCResponse::KRPCError(krpcerror) => krpcerror.transaction_id,
+                };
+
+                match pending.remove(&transaction_id) {
+                    Some(KRPCRequest::Ping(_)) if matches!(res, KRPCResponse::Ping(_)) => {}
+                    Some(KRPCRequest::GetPeers(_)) if matches!(res, KRPCResponse::GetPeers(_)) => {
+                        let res = match res {
+                            KRPCResponse::GetPeers(gp) => gp,
+                            _ => unreachable!(),
+                        };
+
+                        if let Some(peer_list) = res.peers {
+                            peers.extend(peer_list);
+                        } else if let Some(nodes) = res.nodes {
+                            for node in nodes {
+                                // println!("Adding node {} to queue", node.location);
+                                queue.push(node);
+                            }
+                        }
+                    }
+                    Some(KRPCRequest::FindNode(_)) if matches!(res, KRPCResponse::FindNode(_)) => {}
+                    None => {}
+                    Some(_) => {
+                        println!(
+                            "Unexpected response for transaction {}: {:?}",
+                            hex::encode(transaction_id),
+                            res
+                        );
+                    }
+                }
+            }
+
             queue.sort_by_key(|n| n.node_id.map(|id| xor_distance(&id, info_hash)));
 
             let candidates: Vec<_> = queue
@@ -60,17 +102,13 @@ impl DhtClient {
             }
 
             for node in &candidates {
-                if let Some(res) = self.query(node, info_hash) {
-                    if let Some(mut new_peers) = res.peers {
-                        peers.append(&mut new_peers);
-                        return Ok(peers);
+                match self.send_query(node, info_hash) {
+                    Ok(req) => {
+                        pending.insert(req.transaction_id, req.into());
                     }
-                    if let Some(new_nodes) = res.nodes {
-                        for new_node in new_nodes {
-                            if !visited.contains(&new_node.location) {
-                                queue.push(new_node);
-                            }
-                        }
+                    Err(_err) => {
+                        // println!("Error querying node {}: {}", node.location, err);
+                        continue;
                     }
                 }
             }
@@ -79,33 +117,25 @@ impl DhtClient {
         Ok(peers)
     }
 
-    fn query(&self, node: &DhtNode, info_hash: &[u8; 20]) -> Option<KRPCResponseGetPeers> {
+    fn send_query(
+        &self,
+        node: &DhtNode,
+        info_hash: &[u8; 20],
+    ) -> Result<KRPCRequestGetPeers, String> {
         println!("Querying DHT node {} for peers", node.location);
         if let Some(node_id) = node.node_id {
             let dist = xor_distance(&node_id, info_hash);
             println!("Querying {} distance: {}", node.location, hex::encode(dist));
         }
 
-        let get_peers_request = KRPCRequestGetPeers::new(self.node_id, *info_hash);
-        let encoded: Vec<u8> = get_peers_request.into();
+        let req = KRPCRequestGetPeers::new(self.node_id, *info_hash);
+        let encoded: Vec<u8> = req.clone().into();
         let addr = node.location.to_string();
-        if self.socket.send_to(&encoded, &addr).is_err() {
-            println!("Failed to send get_peers request to {}", addr);
-            return None;
-        }
+        self.socket
+            .send_to(&encoded, &addr)
+            .map_err(|e| format!("Failed to send get_peers to {}: {}", addr, e))?;
 
-        if let Some(res) = self.recv_response() {
-            match res {
-                KRPCResponse::GetPeers(get_peers_res) => Some(get_peers_res),
-                other => {
-                    println!("Unexpected response type from {}: {:?}", addr, other);
-                    None
-                }
-            }
-        } else {
-            println!("No response received from {}", addr);
-            None
-        }
+        Ok(req)
     }
 
     #[allow(dead_code)]
@@ -133,16 +163,18 @@ impl DhtClient {
     }
 
     pub fn recv_response(&self) -> Option<KRPCResponse> {
-        let mut buf = [0u8; 65536]; // max UDP packet size
-        match self.socket.recv_from(&mut buf) {
-            Ok((size, _)) => match KRPCResponse::try_from(&buf[..size]) {
-                Ok(res) => Some(res),
-                Err(err) => {
-                    println!("Failed to parse KRPC response: {}", err);
-                    None
-                }
-            },
-            Err(_) => None,
+        let mut buf = [0u8; 65536];
+        loop {
+            match self.socket.recv_from(&mut buf) {
+                Ok((size, src)) => match KRPCResponse::try_from(&buf[..size]) {
+                    Ok(res) => return Some(res),
+                    Err(err) => {
+                        println!("Failed to parse from {}: {}", src, err);
+                        continue; // skip garbage, keep waiting
+                    }
+                },
+                Err(_) => return None, // timeout = genuinely no response
+            }
         }
     }
 }

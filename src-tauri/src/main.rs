@@ -19,6 +19,8 @@ use std::{
     thread,
 };
 
+use dotenvy::dotenv;
+
 use crate::{
     bencoding::{
         decode,
@@ -34,6 +36,7 @@ use crate::{
 
 fn main() {
     // bittorrent_lib::run();
+    dotenv().ok();
 
     let search_dir = std::env::var("TORRENT_DIR")
         .map(std::path::PathBuf::from)
@@ -71,9 +74,10 @@ fn main() {
     let progress: Arc<Mutex<TorrentProgress>> = Arc::new(Mutex::new((&torrent).into()));
 
     // Find all files in pieces directory
-    for entry in std::fs::read_dir("/pieces").unwrap_or_else(|_| {
-        create_dir_all("/pieces").expect("Failed to create pieces directory");
-        std::fs::read_dir("/pieces").expect("Failed to read pieces directory")
+    let pieces_dir = std::env::var("PIECES_DIR").unwrap_or_else(|_| "/pieces".to_string());
+    for entry in std::fs::read_dir(&pieces_dir).unwrap_or_else(|_| {
+        create_dir_all(&pieces_dir).expect("Failed to create pieces directory");
+        std::fs::read_dir(&pieces_dir).expect("Failed to read pieces directory")
     }) {
         let entry = entry.expect("Failed to read directory entry");
         let path = entry.path();
@@ -170,15 +174,27 @@ fn get_peers_from_torrent(torrent: &Torrent) -> Result<Vec<Peer>, String> {
         .filter(|t| matches!(t, Tracker::Http(_)))
         .map(|t| String::from(t.clone()))
         .collect::<Vec<_>>();
+    let dht_trackers: Vec<_> = torrent
+        .trackers
+        .iter()
+        .filter_map(|t| {
+            if let Tracker::Dht(addr) = t {
+                Some(addr.clone())
+            } else {
+                None
+            }
+        })
+        .chain([
+            "router.bittorrent.com:6881".to_string(),
+            "dht.transmissionbt.com:6881".to_string(),
+            "router.utorrent.com:6881".to_string(),
+        ])
+        .collect();
+
+    return get_peers_dht(&torrent.info_hash, dht_trackers);
+
     if http_trackers.is_empty() {
-        return get_peers_dht(
-            &torrent.info_hash,
-            torrent
-                .trackers
-                .iter()
-                .map(|t| String::from(t.clone()))
-                .collect(),
-        );
+        return get_peers_dht(&torrent.info_hash, dht_trackers);
     }
 
     Ok(http_trackers

@@ -18,14 +18,14 @@ pub struct KRPCResponsePing {
 
 #[derive(Debug)]
 pub struct KRPCResponseFindNode {
-    transaction_id: [u8; 2],
+    pub transaction_id: [u8; 2],
     node_id: [u8; 20],
     nodes: Vec<DhtNode>,
 }
 
 #[derive(Debug)]
 pub struct KRPCResponseGetPeers {
-    transaction_id: [u8; 2],
+    pub transaction_id: [u8; 2],
     node_id: [u8; 20],
     pub peers: Option<Vec<Peer>>,
     pub nodes: Option<Vec<DhtNode>>,
@@ -34,6 +34,7 @@ pub struct KRPCResponseGetPeers {
 
 #[derive(Debug)]
 pub struct KRPCError {
+    pub transaction_id: [u8; 2],
     error_code: KRPCErrorCode,
     error_message: String,
 }
@@ -50,7 +51,7 @@ impl TryFrom<&[u8]> for KRPCResponse {
     type Error = String;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        let decoded = match decode::decode_dictionary(value, &mut 0) {
+        let decoded = match decode::decode_dictionary(value, &mut 0)? {
             Value::Dict(d) => d,
             _ => panic!("Invalid KRPC response: expected dictionary"),
         };
@@ -196,6 +197,23 @@ impl TryFrom<&HashMap<String, Value>> for KRPCResponseGetPeers {
 
         let peers = match res.get("values") {
             Some(Value::Peers(p)) => Some(p.iter().map(Peer::from).collect()),
+            Some(Value::List(list)) => {
+                let parsed: Vec<Peer> = list
+                    .iter()
+                    .filter_map(|v| {
+                        if let Value::Bytes(b) = v {
+                            b.as_slice().try_into().ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if parsed.is_empty() {
+                    None
+                } else {
+                    Some(parsed)
+                }
+            }
             _ => None,
         };
 
@@ -244,6 +262,15 @@ impl TryFrom<&HashMap<String, Value>> for KRPCError {
     type Error = String;
 
     fn try_from(dict: &HashMap<String, Value>) -> Result<Self, Self::Error> {
+        let transaction_id = match dict.get("t") {
+            Some(Value::Bytes(b)) if b.len() == 2 => [b[0], b[1]],
+            Some(Value::Str(s)) if s.len() == 2 => {
+                let bytes = s.as_bytes();
+                [bytes[0], bytes[1]]
+            }
+            _ => return Err("Missing or invalid transaction ID".to_string()),
+        };
+
         let error_code = match dict.get("e") {
             Some(Value::List(l)) if l.len() == 2 => match &l[0] {
                 Value::Number(n) => match *n as u16 {
@@ -272,6 +299,7 @@ impl TryFrom<&HashMap<String, Value>> for KRPCError {
         };
 
         Ok(KRPCError {
+            transaction_id,
             error_code,
             error_message,
         })

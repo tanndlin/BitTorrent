@@ -116,7 +116,7 @@ pub struct TrackerResponseGood {
 
 impl HTTPResponse for TrackerResponse {
     fn from_http_response(response: &[u8]) -> Self {
-        let map = match decode_dictionary(response, &mut 0) {
+        let map = match decode_dictionary(response, &mut 0).unwrap() {
             Value::Dict(d) => d,
             _ => panic!("Expected a dictionary at the top level"),
         };

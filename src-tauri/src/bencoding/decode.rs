@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::bencoding::torrent::{self, File, Info, Torrent, Tracker};
 
 pub fn parse_metainfo(content: &Vec<u8>) -> Torrent {
-    let parsed = decode_dictionary(content, &mut 0);
+    let parsed = decode_dictionary(content, &mut 0).unwrap();
     let dict = match parsed {
         Value::Dict(map) => map,
         _ => panic!("metainfo is not a dictionary"),
@@ -50,14 +50,7 @@ pub fn parse_metainfo(content: &Vec<u8>) -> Torrent {
         }
     }
 
-    // If there are no trackers, add a default DHT tracker
-    if trackers.is_empty() {
-        trackers.push(Tracker::Dht("router.bittorrent.com:6881".to_string()));
-        trackers.push(Tracker::Dht("dht.transmissionbt.com:6881".to_string()));
-        trackers.push(Tracker::Dht("router.utorrent.com:6881".to_string()));
-    }
-
-    let info_hash = get_info_hash(content, 0);
+    let info_hash = get_info_hash(content, 0).unwrap();
     // Print as a hex string
     println!(
         "Info hash: {:02x?}",
@@ -142,35 +135,45 @@ pub enum Value {
     Peers(Vec<[u8; 6]>),
 }
 
-pub fn decode_dictionary(content: &[u8], index: &mut usize) -> Value {
-    assert!(content[*index] == torrent::DICTIONARY_START);
+pub fn decode_dictionary(content: &[u8], index: &mut usize) -> Result<Value, String> {
+    if content[*index] != torrent::DICTIONARY_START {
+        return Err(format!(
+            "Expected dictionary start 'd' at index {}, found '{}'",
+            index, content[*index] as char
+        ));
+    }
 
     *index += 1; // move past 'd'
     let mut map = HashMap::new();
 
     while content[*index] != torrent::DICTIONARY_END {
-        let key = get_string(content, index);
+        let key = get_string(content, index)?;
         if key == "pieces" {
-            map.insert(key, Value::Hashes(parse_hashes(content, index)));
+            map.insert(key, Value::Hashes(parse_hashes(content, index)?));
             continue;
         }
 
         if key == "peers" {
-            map.insert(key, Value::Peers(parse_peers(content, index)));
+            map.insert(key, Value::Peers(parse_peers(content, index)?));
             continue;
         }
 
-        let value = parse_next(content, index);
+        let value = parse_next(content, index)?;
         map.insert(key, value);
     }
 
-    assert!(content[*index] == torrent::DICTIONARY_END);
+    if content[*index] != torrent::DICTIONARY_END {
+        return Err(format!(
+            "Expected dictionary end 'e' at index {}, found '{}'",
+            index, content[*index] as char
+        ));
+    }
     *index += 1; // move past 'e'
 
-    Value::Dict(map)
+    Ok(Value::Dict(map))
 }
 
-fn parse_next(content: &[u8], index: &mut usize) -> Value {
+fn parse_next(content: &[u8], index: &mut usize) -> Result<Value, String> {
     if content[*index] == torrent::INTEGER_START {
         parse_number(content, index)
     } else if content[*index] == torrent::DICTIONARY_START {
@@ -178,40 +181,58 @@ fn parse_next(content: &[u8], index: &mut usize) -> Value {
     } else if content[*index] == torrent::LIST_START {
         parse_list(content, index)
     } else {
-        let bytes = get_bytes(content, index);
+        let bytes = get_bytes(content, index)?;
         // Try UTF-8, fall back to raw bytes
-        match String::from_utf8(bytes.clone()) {
+        Ok(match String::from_utf8(bytes.clone()) {
             Ok(s) => Value::Str(s),
             Err(_) => Value::Bytes(bytes),
-        }
+        })
     }
 }
 
-fn parse_number(content: &[u8], index: &mut usize) -> Value {
+fn parse_number(content: &[u8], index: &mut usize) -> Result<Value, String> {
     *index += 1;
     let number = get_next_number(content, index);
-    assert!(content[*index] == torrent::INTEGER_END);
+    if content[*index] != torrent::INTEGER_END {
+        return Err(format!(
+            "Expected integer end 'e' at index {}, found '{}'",
+            index, content[*index] as char
+        ));
+    }
     *index += 1; // move past 'e'
-    Value::Number(number)
+    Ok(Value::Number(number))
 }
 
-fn parse_list(content: &[u8], index: &mut usize) -> Value {
+fn parse_list(content: &[u8], index: &mut usize) -> Result<Value, String> {
     *index += 1; // move past 'l'
     let mut list = Vec::new();
     while content[*index] != torrent::LIST_END {
-        list.push(parse_next(content, index));
+        list.push(parse_next(content, index)?);
     }
-    assert!(content[*index] == torrent::LIST_END);
+
+    if content[*index] != torrent::LIST_END {
+        return Err(format!(
+            "Expected list end 'e' at index {}, found '{}'",
+            index, content[*index] as char
+        ));
+    }
+
     *index += 1; // move past 'e'
-    Value::List(list)
+    Ok(Value::List(list))
 }
 
 // Fix the parse_hashes function
-fn parse_hashes(content: &[u8], index: &mut usize) -> Vec<[u8; 20]> {
+fn parse_hashes(content: &[u8], index: &mut usize) -> Result<Vec<[u8; 20]>, String> {
     let size = get_next_number(content, index);
 
     // Check for colon separator
-    assert!(content[*index] == torrent::COLON);
+    if content[*index] != torrent::COLON {
+        return Err(format!(
+            "Expected colon ':' after pieces length at index {}, found '{}'",
+            index, content[*index] as char
+        ));
+    }
+
     *index += 1; // move past ':'
 
     let mut hashes = Vec::new();
@@ -226,12 +247,18 @@ fn parse_hashes(content: &[u8], index: &mut usize) -> Vec<[u8; 20]> {
         remaining -= 20;
     }
 
-    hashes
+    Ok(hashes)
 }
 
-fn parse_peers(content: &[u8], index: &mut usize) -> Vec<[u8; 6]> {
+fn parse_peers(content: &[u8], index: &mut usize) -> Result<Vec<[u8; 6]>, String> {
     let size = get_next_number(content, index) as usize;
-    assert!(content[*index] == torrent::COLON);
+    if content[*index] != torrent::COLON {
+        return Err(format!(
+            "Expected colon ':' after peers length at index {}, found '{}'",
+            index, content[*index] as char
+        ));
+    }
+
     *index += 1; // move past ':'
     let mut peers = Vec::new();
     let end = *index + size;
@@ -243,21 +270,27 @@ fn parse_peers(content: &[u8], index: &mut usize) -> Vec<[u8; 6]> {
         *index += 6;
     }
 
-    peers
+    Ok(peers)
 }
 
-fn get_bytes(content: &[u8], index: &mut usize) -> Vec<u8> {
+fn get_bytes(content: &[u8], index: &mut usize) -> Result<Vec<u8>, String> {
     let size = get_next_number(content, index) as usize;
-    assert!(content[*index] == torrent::COLON);
+    if content[*index] != torrent::COLON {
+        return Err(format!(
+            "Expected colon ':' after byte string length at index {}, found '{}'",
+            index, content[*index] as char
+        ));
+    }
+
     *index += 1;
     let bytes = content[*index..*index + size].to_vec();
     *index += size;
-    bytes
+    Ok(bytes)
 }
 
-fn get_string(content: &[u8], index: &mut usize) -> String {
-    let bytes = get_bytes(content, index);
-    String::from_utf8(bytes).unwrap()
+fn get_string(content: &[u8], index: &mut usize) -> Result<String, String> {
+    let bytes = get_bytes(content, index)?;
+    String::from_utf8(bytes).map_err(|e| format!("Invalid UTF-8 string at index {}: {}", index, e))
 }
 
 fn get_next_number(content: &[u8], index: &mut usize) -> i64 {
@@ -321,29 +354,29 @@ fn print_hashes(hashes: &Vec<[u8; 20]>) {
     }
 }
 
-pub fn get_info_hash(content: &Vec<u8>, start: usize) -> [u8; 20] {
+pub fn get_info_hash(content: &Vec<u8>, start: usize) -> Result<[u8; 20], String> {
     let mut index = start;
 
     // Find the "info" dictionary
     while index < content.len() {
         if content[index] == torrent::DICTIONARY_START {
             index += 1;
-            let key = get_string(content, &mut index);
+            let key = get_string(content, &mut index)?;
             if key == "info" {
                 // We found the "info" key, now hash the corresponding dictionary
                 let start = index - key.len() - 1; // include the length prefix and colon
                 let mut hasher = Sha1::new();
-                decode_dictionary(content, &mut index); // parse to move the index forward
+                decode_dictionary(content, &mut index)?; // parse to move the index forward
                 let end = index; // end of the "info" dictionary
 
                 hasher.update(&content[start..end]);
-                return hasher.finalize().into();
+                return Ok(hasher.finalize().into());
             } else {
                 // Skip this dictionary entry
                 return get_info_hash(content, index);
             }
         } else {
-            let next = parse_next(content, &mut index);
+            let next = parse_next(content, &mut index)?;
             dbg!(&next);
             if let Value::Str(value) = next {
                 if value == "info" {
@@ -352,7 +385,7 @@ pub fn get_info_hash(content: &Vec<u8>, start: usize) -> [u8; 20] {
                     decode_dictionary(content, &mut index); // parse to move the index forward
                     let end = index; // end of the "info" dictionary
                     hasher.update(&content[start..end]);
-                    return hasher.finalize().into();
+                    return Ok(hasher.finalize().into());
                 }
             }
         }
