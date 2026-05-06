@@ -3,7 +3,10 @@ use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 
 use url::Url;
 
-use crate::bencoding::decode::{decode_dictionary, Value};
+use crate::{
+    bencoding::decode::{decode_dictionary, Value},
+    peer,
+};
 
 pub trait ToUrl {
     fn to_url_params(&self) -> String;
@@ -244,6 +247,29 @@ pub struct Peer {
     pub port: u16,
 }
 
+impl Peer {
+    pub fn to_string(&self) -> String {
+        format!("{}:{}", self.ip, self.port)
+    }
+}
+
+impl From<String> for Peer {
+    fn from(s: String) -> Self {
+        let parts: Vec<&str> = s.split(':').collect();
+        if parts.len() != 2 {
+            panic!("Invalid peer string: {}", s);
+        }
+
+        let ip = parts[0]
+            .parse()
+            .unwrap_or_else(|_| panic!("Invalid IP address: {}", parts[0]));
+        let port = parts[1]
+            .parse()
+            .unwrap_or_else(|_| panic!("Invalid port: {}", parts[1]));
+        Peer { ip, port }
+    }
+}
+
 impl From<[u8; 6]> for Peer {
     fn from(bytes: [u8; 6]) -> Self {
         Peer {
@@ -253,9 +279,23 @@ impl From<[u8; 6]> for Peer {
     }
 }
 
-impl From<&[u8]> for Peer {
-    fn from(bytes: &[u8]) -> Self {
-        Peer::from(<[u8; 6]>::try_from(bytes).unwrap())
+impl From<&[u8; 6]> for Peer {
+    fn from(bytes: &[u8; 6]) -> Self {
+        Peer {
+            ip: IpAddr::V4(Ipv4Addr::from(<[u8; 4]>::try_from(&bytes[0..4]).unwrap())),
+            port: u16::from_be_bytes(bytes[4..6].try_into().unwrap()),
+        }
+    }
+}
+
+impl TryFrom<&[u8]> for Peer {
+    type Error = String;
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        let peer_bytes: [u8; 6] = bytes
+            .try_into()
+            .map_err(|_| "Invalid peer bytes, expected 6 bytes".to_string())?;
+
+        Ok(Peer::from(peer_bytes))
     }
 }
 
@@ -276,7 +316,11 @@ impl From<&[u8]> for AnnounceResponse {
         let interval = u32::from_be_bytes(bytes[8..12].try_into().unwrap());
         let leechers = u32::from_be_bytes(bytes[12..16].try_into().unwrap());
         let seeders = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
-        let peers: Vec<Peer> = bytes[20..].chunks_exact(6).map(Peer::from).collect();
+        let peers: Vec<Peer> = bytes[20..]
+            .chunks_exact(6)
+            .map(Peer::try_from)
+            .filter_map(Result::ok)
+            .collect();
 
         AnnounceResponse {
             action,

@@ -25,7 +25,7 @@ use crate::{
         torrent::{Torrent, Tracker},
     },
     connection::{Event, HTTPResponse, Peer, ToUrl, TrackerRequest, TrackerResponse},
-    dht::dht_node::DHTNode,
+    dht::dht_node::DhtClient,
     peer::{
         peer_protocol::connect_to_peer,
         types::{PieceProgress, TorrentProgress},
@@ -58,7 +58,7 @@ fn main() {
     dbg!(&torrent.trackers);
 
     let start_time = std::time::Instant::now();
-    let peers = get_peers_from_torrent(&torrent);
+    let peers = get_peers_from_torrent(&torrent).expect("Failed to get peers from torrent");
 
     println!("Total peers collected: {}", peers.len());
     dbg!(&peers);
@@ -163,7 +163,7 @@ fn main() {
     println!("File saved successfully!");
 }
 
-fn get_peers_from_torrent(torrent: &Torrent) -> Vec<Peer> {
+fn get_peers_from_torrent(torrent: &Torrent) -> Result<Vec<Peer>, String> {
     let http_trackers = torrent
         .trackers
         .iter()
@@ -180,7 +180,7 @@ fn get_peers_from_torrent(torrent: &Torrent) -> Vec<Peer> {
         );
     }
 
-    http_trackers
+    Ok(http_trackers
         .into_iter()
         .flat_map(|tracker| {
             let response = match get_peers_http(torrent, &tracker) {
@@ -211,12 +211,12 @@ fn get_peers_from_torrent(torrent: &Torrent) -> Vec<Peer> {
 
             response.peers
         })
-        .collect()
+        .collect())
 }
 
-fn get_peers_dht(trackers: Vec<String>) -> Vec<Peer> {
+fn get_peers_dht(trackers: Vec<String>) -> Result<Vec<Peer>, String> {
     println!("No HTTP trackers found, falling back to DHT");
-    DHTNode::new(trackers).get_peers()
+    DhtClient::new(trackers).get_peers()
 }
 
 fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, String> {

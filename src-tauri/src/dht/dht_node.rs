@@ -4,68 +4,20 @@ use rand::Rng;
 
 use crate::{
     connection::Peer,
-    dht::{krpc_request::KRPCRequestPing, krpc_response::KRPCResponse},
+    dht::{
+        krpc_request::{KRPCRequestGetPeers, KRPCRequestPing},
+        krpc_response::KRPCResponse,
+    },
 };
-
-pub struct DHTNode {
-    external_nodes: Vec<String>,
-}
-
-impl DHTNode {
-    pub fn new(trackers: Vec<String>) -> Self {
-        let mut external_nodes = trackers;
-        if external_nodes.is_empty() {
-            println!("No nodes found in DHT, adding default nodes");
-            external_nodes = Self::get_default_nodes();
-        }
-
-        DHTNode { external_nodes }
-    }
-
-    pub fn get_peers(&self) -> Vec<Peer> {
-        println!("Found {} nodes in DHT", self.external_nodes.len());
-        // Send ping to each node
-        self.external_nodes.iter().for_each(|node| {
-            println!("Pinging node: {}", node);
-            // Simulate ping response with a dummy peer
-            // let peer = Peer {
-            //     ip: IpAddr::V4(
-            //         node.split(':')
-            //             .nth(0)
-            //             .and_then(|ip| ip.parse::<std::net::Ipv4Addr>().ok())
-            //             .unwrap_or(std::net::Ipv4Addr::new(0, 0, 0, 0)),
-            //     ),
-            //     port: node
-            //         .split(':')
-            //         .nth(1)
-            //         .and_then(|p| p.parse::<u16>().ok())
-            //         .unwrap_or(0),
-            // };
-
-            DhtClient::new()
-                .send_ping(node)
-                .unwrap_or_else(|e| println!("Failed to ping {}: {}", node, e));
-        });
-
-        vec![]
-    }
-
-    fn get_default_nodes() -> Vec<String> {
-        vec![
-            "router.bittorrent.com:6881".to_string(),
-            "dht.transmissionbt.com:6881".to_string(),
-            "router.utorrent.com:6881".to_string(),
-        ]
-    }
-}
 
 pub struct DhtClient {
     socket: UdpSocket,
     node_id: [u8; 20],
+    pub nodes: Vec<DhtNode>,
 }
 
 impl DhtClient {
-    pub fn new() -> Self {
+    pub fn new(trackers: Vec<String>) -> Self {
         let socket = UdpSocket::bind("0.0.0.0:6881").unwrap();
         socket
             .set_read_timeout(Some(Duration::from_secs(1)))
@@ -74,21 +26,82 @@ impl DhtClient {
         let mut node_id = [0u8; 20];
         rand::rng().fill(&mut node_id);
 
-        DhtClient { socket, node_id }
+        let nodes = trackers
+            .into_iter()
+            .map(|tracker| DhtNode {
+                node_id: [0u8; 20], // TODO: We should get the node ID from the tracker
+                location: tracker,
+            })
+            .collect();
+
+        DhtClient {
+            socket,
+            node_id,
+            nodes,
+        }
     }
 
-    pub fn send_ping(&self, addr: &str) -> std::io::Result<()> {
-        let ping_request = KRPCRequestPing::new(self.node_id);
-        let encoded: Vec<u8> = ping_request.into();
-        self.socket.send_to(&encoded, addr)?;
+    pub fn get_peers(&self) -> Result<Vec<Peer>, String> {
+        let mut peers = vec![];
 
-        if let Some(res) = self.recv_response() {
-            println!("Received response from {}: {:?}", addr, res);
-        } else {
-            println!("No response received from {}", addr);
+        for node in &self.nodes {
+            if let Err(err) = self.send_ping(node) {
+                println!("Error sending ping to {}: {}", node.location, err);
+                continue;
+            }
+
+            let get_peers_request = KRPCRequestGetPeers::new(self.node_id, [0u8; 20]);
+            let encoded: Vec<u8> = get_peers_request.into();
+            let addr = node.location.to_string();
+            self.socket
+                .send_to(&encoded, &addr)
+                .map_err(|e| format!("Failed to send get_peers to {}: {}", addr, e))
+                .unwrap();
+
+            if let Some(res) = self.recv_response() {
+                match res {
+                    KRPCResponse::GetPeers(get_peers_res) => {
+                        if let Some(mut new_peers) = get_peers_res.peers {
+                            peers.append(&mut new_peers);
+                        } else {
+                            println!(
+                                "DhtNode sent other nodes instead of peers: {:?}",
+                                get_peers_res.nodes
+                            );
+                        }
+                    }
+                    _ => println!(
+                        "Expected get_peers response from {}, but got: {:?}",
+                        addr, res
+                    ),
+                }
+            }
         }
 
-        Ok(())
+        Ok(peers)
+    }
+
+    fn send_ping(&self, node: &DhtNode) -> Result<(), String> {
+        let ping_request = KRPCRequestPing::new(self.node_id);
+        let encoded: Vec<u8> = ping_request.into();
+
+        let addr = node.location.to_string();
+        self.socket
+            .send_to(&encoded, &addr)
+            .map_err(|e| format!("Failed to send ping to {}: {}", addr, e))?;
+
+        if let Some(res) = self.recv_response() {
+            println!("Received response from {}: {:?}", &addr, res);
+            match res {
+                KRPCResponse::Ping(_) => Ok(()),
+                _ => Err(format!(
+                    "Expected ping response from {}, but got: {:?}",
+                    addr, res
+                )),
+            }
+        } else {
+            Err(format!("No response received from {}", addr))
+        }
     }
 
     pub fn recv_response(&self) -> Option<KRPCResponse> {
@@ -104,4 +117,9 @@ impl DhtClient {
             Err(_) => None,
         }
     }
+}
+
+pub struct DhtNode {
+    node_id: [u8; 20],
+    location: String,
 }

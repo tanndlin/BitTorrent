@@ -50,6 +50,13 @@ pub fn parse_metainfo(content: &Vec<u8>) -> Torrent {
         }
     }
 
+    // If there are no trackers, add a default DHT tracker
+    if trackers.is_empty() {
+        trackers.push(Tracker::Dht("router.bittorrent.com:6881".to_string()));
+        trackers.push(Tracker::Dht("dht.transmissionbt.com:6881".to_string()));
+        trackers.push(Tracker::Dht("router.utorrent.com:6881".to_string()));
+    }
+
     let info_hash = get_info_hash(content, 0);
     // Print as a hex string
     println!(
