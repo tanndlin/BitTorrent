@@ -11,8 +11,8 @@ pub enum KRPCResponse {
 
 #[derive(Debug)]
 pub struct KRPCResponsePing {
-    transaction_id: [u8; 2],
-    node_id: [u8; 20],
+    pub transaction_id: [u8; 2],
+    pub node_id: [u8; 20],
 }
 
 #[derive(Debug)]
@@ -61,10 +61,10 @@ impl TryFrom<&HashMap<String, Value>> for KRPCResponsePing {
         };
         let node_id = match dict.get("r").and_then(|r| match r {
             Value::Dict(d) => d.get("id").and_then(|id| match id {
-                Value::Bytes(b) if b.len() == 20 => Some([
-                    b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11],
-                    b[12], b[13], b[14], b[15], b[16], b[17], b[18], b[19],
-                ]),
+                Value::Bytes(b) if b.len() == 20 => {
+                    let id: [u8; 20] = b.as_slice().try_into().unwrap();
+                    Some(id)
+                }
                 _ => None,
             }),
             _ => None,
@@ -79,8 +79,67 @@ impl TryFrom<&HashMap<String, Value>> for KRPCResponsePing {
     }
 }
 
+impl TryFrom<&HashMap<String, Value>> for KRPCResponseFindNode {
+    type Error = String;
+
+    fn try_from(dict: &HashMap<String, Value>) -> Result<Self, Self::Error> {
+        let transaction_id = match dict.get("t") {
+            Some(Value::Bytes(b)) if b.len() == 2 => [b[0], b[1]],
+            _ => return Err("Missing or invalid transaction ID".to_string()),
+        };
+
+        let res = match dict.get("r") {
+            Some(Value::Dict(d)) => d,
+            _ => return Err("Missing or invalid 'r' dictionary in response".to_string()),
+        };
+
+        let node_id = match res.get("id") {
+            Some(Value::Bytes(b)) if b.len() == 20 => {
+                let id: [u8; 20] = b.as_slice().try_into().unwrap();
+                id
+            }
+            _ => return Err("Missing or invalid node ID in response".to_string()),
+        };
+
+        let nodes = match res.get("nodes") {
+            Some(Value::Bytes(b)) => {
+                if b.len() % 26 != 0 {
+                    return Err(
+                        "Invalid 'nodes' value: length must be a multiple of 26".to_string()
+                    );
+                }
+                (0..b.len())
+                    .step_by(26)
+                    .map(|i| {
+                        let node_info = &b[i..i + 26];
+                        let ip = format!(
+                            "{}.{}.{}.{}",
+                            node_info[0], node_info[1], node_info[2], node_info[3]
+                        );
+                        let port = ((node_info[24] as u16) << 8) | (node_info[25] as u16);
+                        format!("{}:{}", ip, port)
+                    })
+                    .collect()
+            }
+            _ => return Err("Missing or invalid 'nodes' value in response".to_string()),
+        };
+
+        Ok(KRPCResponseFindNode {
+            transaction_id,
+            node_id,
+            nodes,
+        })
+    }
+}
+
 impl From<KRPCResponsePing> for KRPCResponse {
     fn from(ping: KRPCResponsePing) -> Self {
         KRPCResponse::Ping(ping)
+    }
+}
+
+impl From<KRPCResponseFindNode> for KRPCResponse {
+    fn from(find_node: KRPCResponseFindNode) -> Self {
+        KRPCResponse::FindNode(find_node)
     }
 }
