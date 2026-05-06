@@ -29,7 +29,7 @@ use crate::{
     connection::{Event, HTTPResponse, Peer, ToUrl, TrackerRequest, TrackerResponse},
     dht::dht_node::DhtClient,
     peer::{
-        peer_protocol::connect_to_peer,
+        peer_protocol::{connect_to_peer, PeerProtocolError},
         types::{PieceProgress, TorrentProgress},
     },
 };
@@ -64,7 +64,8 @@ fn main() {
     let peers = get_peers_from_torrent(&torrent).expect("Failed to get peers from torrent");
 
     println!("Total peers collected: {}", peers.len());
-    dbg!(&peers);
+    // let peers = peers.into_iter().take(250).collect::<Vec<_>>();
+    // println!("Using {} peers for downloading", peers.len());
 
     if peers.is_empty() {
         println!("No peers available to connect to.");
@@ -74,7 +75,7 @@ fn main() {
     let progress: Arc<Mutex<TorrentProgress>> = Arc::new(Mutex::new((&torrent).into()));
 
     // Find all files in pieces directory
-    let pieces_dir = std::env::var("PIECES_DIR").unwrap_or_else(|_| "/pieces".to_string());
+    let pieces_dir = std::env::var("PIECES_DIR").expect("Env var PIECES_DIR not set");
     for entry in std::fs::read_dir(&pieces_dir).unwrap_or_else(|_| {
         create_dir_all(&pieces_dir).expect("Failed to create pieces directory");
         std::fs::read_dir(&pieces_dir).expect("Failed to read pieces directory")
@@ -108,27 +109,92 @@ fn main() {
 
     println!(
         "Found existing {}/{} pieces",
-        progress.lock().unwrap().pieces.len(),
+        progress
+            .lock()
+            .unwrap()
+            .pieces
+            .iter()
+            .filter(|p| matches!(p.1, PieceProgress::Completed(_)))
+            .count(),
         torrent.info.pieces.len()
     );
-
-    dbg!(&peers);
 
     let torrent = Arc::new(torrent);
     let mut threads = vec![];
     for peer in peers {
-        println!("Attempting to connect to peer: {}:{}", peer.ip, peer.port);
+        // println!("Attempting to connect to peer: {}:{}", peer.ip, peer.port);
         let progress = Arc::clone(&progress);
         let torrent = Arc::clone(&torrent);
         threads.push(thread::spawn(move || {
             match connect_to_peer(&peer, &torrent, progress) {
                 Ok(_) => println!("Successfully connected to peer: {}:{}", peer.ip, peer.port),
-                Err(err) => println!(
-                    "Error communicating with peer {}:{} - {}",
-                    peer.ip, peer.port, err
-                ),
+                Err(err) => match err {
+                    PeerProtocolError::ReceivedError(e) => {
+                        println!("Receive error with peer {}:{} - {}", peer.ip, peer.port, e);
+                    }
+                    PeerProtocolError::Unknown(e) => {
+                        println!("Unknown error with peer {}:{} - {}", peer.ip, peer.port, e);
+                    }
+                    _ => {}
+                },
             }
         }));
+    }
+
+    // Every second, print progress until all pieces are complete
+    let total_blocks: u64 = progress
+        .lock()
+        .unwrap()
+        .pieces
+        .iter()
+        .map(|p| match p.1 {
+            PieceProgress::InProgress(piece_progress_data) => piece_progress_data.data.len() as u64,
+            // Estimate completed pieces as full length, even if we don't have all the blocks yet, since we want to show progress as we download blocks for a piece
+            PieceProgress::Completed(_) => {
+                (torrent.get_piece_length(*p.0 as usize) / (torrent.info.piece_length as u32))
+                    as u64
+            }
+        })
+        .sum();
+    loop {
+        let completed_blocks: u64 = progress
+            .lock()
+            .unwrap()
+            .pieces
+            .iter()
+            .map(|p| match p.1 {
+                PieceProgress::InProgress(piece_progress_data) => piece_progress_data
+                    .data
+                    .values()
+                    .filter(|b| b.data.is_some())
+                    .count()
+                    as u64,
+                PieceProgress::Completed(_) => {
+                    (torrent.get_piece_length(*p.0 as usize) / (torrent.info.piece_length as u32))
+                        as u64
+                }
+            })
+            .sum();
+
+        let percent = (completed_blocks as f64 / total_blocks as f64) * 100.0;
+        print!(
+            "\rProgress - {}/{} blocks ({:.2}%)",
+            completed_blocks, total_blocks, percent
+        );
+        std::io::stdout().flush().unwrap();
+
+        // Check if all pieces are complete
+        if progress
+            .lock()
+            .unwrap()
+            .pieces
+            .iter()
+            .all(|p| matches!(p.1, PieceProgress::Completed(_)))
+        {
+            break;
+        }
+
+        std::thread::sleep(std::time::Duration::from_secs(1));
     }
 
     // Wait for all threads to finish
@@ -219,7 +285,7 @@ fn get_peers_from_torrent(torrent: &Torrent) -> Result<Vec<Peer>, String> {
             println!("Interval: {}", response.interval);
             println!("Leechers: {}", response.incomplete.unwrap_or(0));
             println!("Seeders: {}", response.complete.unwrap_or(0));
-            println!("Peers: {:?}", response.peers);
+            println!("Peers: {}", response.peers.len());
 
             if response.peers.is_empty() {
                 println!("No peers available from tracker");

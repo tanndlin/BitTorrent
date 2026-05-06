@@ -19,22 +19,31 @@ use std::{
 
 const MAX_INFLIGHT_REQUESTS: u32 = 200;
 
+#[derive(Debug)]
+pub enum PeerProtocolError {
+    FailedToConnect,
+    ConnectionClosed,
+    HandshakeError(String),
+    ReceivedError(String),
+    Unknown(String),
+}
+
 pub fn connect_to_peer(
     peer: &Peer,
     torrent: &Torrent,
     progress: Arc<Mutex<TorrentProgress>>,
-) -> Result<(), String> {
-    let stream = TcpStream::connect((peer.ip, peer.port))
-        .map_err(|e| format!("Failed to connect to peer {}: {}", peer.ip, e))?;
+) -> Result<(), PeerProtocolError> {
+    let stream =
+        TcpStream::connect((peer.ip, peer.port)).map_err(|_| PeerProtocolError::FailedToConnect)?;
     let peer = format!("{}:{}", peer.ip, peer.port);
-    println!("{} - Connected", peer);
+    // println!("{} - Connected", peer);
 
     let mut peer_message_stream = PeerMessageStream::new(stream);
     let mut peer_state = handle_handshake(torrent, &progress, &mut peer_message_stream, peer)?;
 
     let interested_message = PeerMessage::create_interested();
     let interested_bytes = Vec::from(&interested_message);
-    println!("Sending interested message: {:?}", interested_bytes);
+    // println!("Sending interested message: {:?}", interested_bytes);
     peer_message_stream
         .write_all(&interested_bytes)
         .expect("Failed to send interested message");
@@ -46,23 +55,12 @@ pub fn connect_to_peer(
         .values()
         .any(|p| !matches!(p, PieceProgress::Completed(_)))
     {
-        match peer_message_stream.try_read_message() {
-            Ok(Some(message)) => {
-                handle_message(&message, &mut peer_state, progress.clone());
-                continue;
-            }
-            Ok(None) => {}
-            Err(e) => {
-                println!("Error reading from peer: {}, closing connection", e);
-                return Err(format!("Error reading from peer: {}", e));
-            }
+        if let Some(message) = peer_message_stream.try_read_message()? {
+            handle_message(&message, &mut peer_state, progress.clone());
+            continue;
         }
 
         if !peer_state.is_choked && peer_state.bitfield.is_empty() {
-            // Just wait for message
-            println!("Peer is not choked but has no pieces, waiting for message...");
-            let message = peer_message_stream.get_next_message();
-            handle_message(&message, &mut peer_state, progress.clone());
             continue;
         }
 
@@ -137,7 +135,7 @@ fn handle_handshake(
     progress: &Arc<Mutex<TorrentProgress>>,
     peer_message_stream: &mut PeerMessageStream,
     peer: String,
-) -> Result<PeerState, String> {
+) -> Result<PeerState, PeerProtocolError> {
     let mut reserved = [0; 8];
     reserved[5] |= 0x10;
     let handshake_request = PeerHandshake {
@@ -147,7 +145,7 @@ fn handle_handshake(
         peer_id: *b"-TR2940-fuckmek6wWLc",
     };
     let handshake_bytes = Vec::from(&handshake_request);
-    println!("{} - Sending handshake: {:?}", peer, handshake_bytes);
+    // println!("{} - Sending handshake: {:?}", peer, handshake_bytes);
     peer_message_stream
         .write_all(&handshake_bytes)
         .expect("Failed to send handshake");
@@ -156,12 +154,14 @@ fn handle_handshake(
         .stream
         .stream
         .read_exact(&mut response_buf)
-        .map_err(|e| format!("{} - Failed to read handshake response: {}", peer, e))?;
+        .map_err(|e| {
+            PeerProtocolError::HandshakeError(format!("Failed to read handshake response: {}", e))
+        })?;
     let handshake_response = PeerHandshake::from(response_buf);
-    println!(
-        "{} - Received handshake response: {:?}",
-        peer, handshake_response
-    );
+    // println!(
+    //     "{} - Received handshake response: {:?}",
+    //     peer, handshake_response
+    // );
 
     let num_bitfield_bytes = torrent.info.pieces.len().div_ceil(8);
     let peer_state = PeerState::new(peer, num_bitfield_bytes);
@@ -181,13 +181,12 @@ fn handle_handshake(
         payload: bitfield_payload,
     };
     let bitfield_bytes = Vec::from(&bitfield_message);
-    println!(
-        "Sending bitfield message of length: {:?}",
-        bitfield_bytes.len()
-    );
     peer_message_stream
         .write_all(&bitfield_bytes)
-        .expect("Failed to send bitfield message");
+        .map_err(|_| {
+            PeerProtocolError::HandshakeError("Failed to send bitfield message".to_string())
+        })?;
+
     Ok(peer_state)
 }
 
@@ -218,25 +217,25 @@ fn handle_message(
 
     match message.id {
         PeerMessageID::KeepAlive => {
-            println!("Received keep-alive message");
+            // println!("Received keep-alive message");
         }
         PeerMessageID::Choke => {
-            println!("{} - Choked us", peer_state.peer);
+            // println!("{} - Choked us", peer_state.peer);
             peer_state.is_choked = true;
         }
         PeerMessageID::Unchoke => {
-            println!("{} - Unchoked us", peer_state.peer);
+            // println!("{} - Unchoked us", peer_state.peer);
             peer_state.is_choked = false;
         }
         PeerMessageID::Interested => {
-            println!("{} - Is interested", peer_state.peer);
+            // println!("{} - Is interested", peer_state.peer);
         }
         PeerMessageID::NotInterested => {
-            println!("{} - Is not interested", peer_state.peer);
+            // println!("{} - Is not interested", peer_state.peer);
         }
         PeerMessageID::Have => {
             let piece_index = u32::from_be_bytes(message.payload[0..4].try_into().unwrap());
-            println!("{} - Has piece index: {}", peer_state.peer, piece_index);
+            // println!("{} - Has piece index: {}", peer_state.peer, piece_index);
 
             let byte_index = (piece_index / 8) as usize;
             let bit_index = 7 - (piece_index % 8);
@@ -245,20 +244,20 @@ fn handle_message(
             }
         }
         PeerMessageID::Bitfield => {
-            println!(
-                "{} - Received bitfield: {:?}",
-                peer_state.peer, message.payload
-            );
+            // println!(
+            //     "{} - Received bitfield: {:?}",
+            //     peer_state.peer, message.payload
+            // );
             peer_state.bitfield = message.payload.clone();
         }
         PeerMessageID::Request => {
             let index = u32::from_be_bytes(message.payload[0..4].try_into().unwrap());
             let begin = u32::from_be_bytes(message.payload[4..8].try_into().unwrap());
             let length = u32::from_be_bytes(message.payload[8..12].try_into().unwrap());
-            println!(
-                "Peer requested piece index: {}, begin: {}, length: {}",
-                index, begin, length
-            );
+            // println!(
+            //     "Peer requested piece index: {}, begin: {}, length: {}",
+            //     index, begin, length
+            // );
         }
         PeerMessageID::Piece => {
             let index = u32::from_be_bytes(message.payload[0..4].try_into().unwrap());
@@ -330,10 +329,10 @@ fn handle_message(
         }
         PeerMessageID::Port => {
             let port = u16::from_be_bytes(message.payload[0..2].try_into().unwrap());
-            println!("Peer's DHT port: {}", port);
+            // println!("Peer's DHT port: {}", port);
         }
         PeerMessageID::Extended => {
-            println!("Received extension message");
+            // println!("Received extension message");
             let extension_id = message.payload[0];
             let extension_id_str = match extension_id {
                 0 => "ut_metadata",
@@ -341,11 +340,11 @@ fn handle_message(
                 2 => "ut_holepunch",
                 _ => "unknown",
             };
-            println!("Extension ID: {} ({})", extension_id, extension_id_str);
+            // println!("Extension ID: {} ({})", extension_id, extension_id_str);
 
             let dictionary =
                 bencoding::decode::decode_dictionary(&message.payload[1..], &mut 0usize);
-            println!("Decoded extension message: {:?}", dictionary);
+            // println!("Decoded extension message: {:?}", dictionary);
         }
     }
 }

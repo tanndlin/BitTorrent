@@ -1,7 +1,10 @@
 use std::{io::Write, net::TcpStream};
 
 use crate::{
-    peer::types::{PeerMessage, PeerMessageID},
+    peer::{
+        peer_protocol::PeerProtocolError,
+        types::{PeerMessage, PeerMessageID},
+    },
     util::greedy_tcp_stream::{GreedyTcpStream, MessageParser},
 };
 
@@ -30,7 +33,7 @@ impl PeerMessageStream {
         self.stream.stream.write_all(buf)
     }
 
-    pub fn try_read_message(&mut self) -> Result<Option<PeerMessage>, std::io::Error> {
+    pub fn try_read_message(&mut self) -> Result<Option<PeerMessage>, PeerProtocolError> {
         self.stream.try_read_message()
     }
 }
