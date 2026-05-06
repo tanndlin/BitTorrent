@@ -143,14 +143,12 @@ pub fn decode_dictionary(content: &[u8], index: &mut usize) -> Value {
 
     while content[*index] != torrent::DICTIONARY_END {
         let key = get_string(content, index);
-        println!("key: {key}");
         if key == "pieces" {
             map.insert(key, Value::Hashes(parse_hashes(content, index)));
             continue;
         }
 
         if key == "peers" {
-            println!("parsing peers");
             map.insert(key, Value::Peers(parse_peers(content, index)));
             continue;
         }
