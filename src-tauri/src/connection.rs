@@ -241,7 +241,7 @@ impl From<AnnounceRequest> for Vec<u8> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Peer {
     pub ip: IpAddr,
     pub port: u16,

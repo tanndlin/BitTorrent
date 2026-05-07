@@ -11,10 +11,12 @@ use crate::{
     util::peer_message_stream::PeerMessageStream,
 };
 use std::{
+    collections::HashSet,
     fs::create_dir_all,
     io::{Read, Write},
     net::TcpStream,
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 const MAX_INFLIGHT_REQUESTS: u32 = 200;
@@ -48,35 +50,51 @@ pub fn connect_to_peer(
         .write_all(&interested_bytes)
         .expect("Failed to send interested message");
 
-    while progress
-        .lock()
-        .unwrap()
-        .pieces
-        .values()
-        .any(|p| !matches!(p, PieceProgress::Completed(_)))
-    {
+    let mut last_progress_check = Instant::now();
+    let mut download_complete = false;
+
+    loop {
+        if last_progress_check.elapsed() > Duration::from_millis(500) {
+            download_complete = progress
+                .lock()
+                .unwrap()
+                .pieces
+                .values()
+                .all(|p| matches!(p, PieceProgress::Completed(_)));
+            last_progress_check = Instant::now();
+        }
+
+        if download_complete {
+            break;
+        }
         if let Some(message) = peer_message_stream.try_read_message()? {
             handle_message(&message, &mut peer_state, progress.clone());
             continue;
         }
 
         if !peer_state.is_choked && peer_state.bitfield.is_empty() {
+            std::thread::sleep(Duration::from_millis(10));
             continue;
         }
 
         if peer_state.bitfield.is_empty() || peer_state.is_choked {
+            std::thread::sleep(Duration::from_millis(10));
             continue;
         }
 
         // Choose 5 random pieces that the peer has and that we don't have
+        let completed_pieces: HashSet<u32> = {
+            let prog = progress.lock().unwrap();
+            prog.pieces
+                .iter()
+                .filter(|(_, v)| matches!(v, PieceProgress::Completed(_)))
+                .map(|(k, _)| *k)
+                .collect()
+        };
+
         let needed_pieces = (0..torrent.info.pieces.len() as u32)
             .filter(|&i| bitfield_contains_piece(&peer_state.bitfield, i))
-            .filter(|&i| {
-                !matches!(
-                    progress.lock().unwrap().pieces.get(&i),
-                    Some(PieceProgress::Completed(_))
-                )
-            });
+            .filter(|&i| !completed_pieces.contains(&i));
 
         while peer_state.requested_pieces.len() < 2 {
             if let Some(piece_index) = needed_pieces.clone().choose(&mut rand::rng()) {
@@ -270,7 +288,7 @@ fn handle_message(
             //     begin,
             //     block.len()
             // );
-            peer_state.inflight -= 1;
+            peer_state.inflight = peer_state.inflight.saturating_sub(1);
 
             let mut progress = progress.lock().unwrap();
             let final_data = if let Some(PieceProgress::InProgress(piece_progress)) =

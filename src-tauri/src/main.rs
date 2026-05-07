@@ -126,7 +126,12 @@ fn main() {
         let progress = Arc::clone(&progress);
         let torrent = Arc::clone(&torrent);
         threads.push(thread::spawn(move || {
-            match connect_to_peer(&peer, &torrent, progress) {
+            progress
+                .lock()
+                .unwrap()
+                .connected_peers
+                .insert(peer.clone());
+            match connect_to_peer(&peer, &torrent, progress.clone()) {
                 Ok(_) => println!("Successfully connected to peer: {}:{}", peer.ip, peer.port),
                 Err(err) => match err {
                     PeerProtocolError::ReceivedError(e) => {
@@ -138,6 +143,9 @@ fn main() {
                     _ => {}
                 },
             }
+
+            // Delete peer from list
+            progress.lock().unwrap().connected_peers.remove(&peer);
         }));
     }
 
@@ -177,9 +185,10 @@ fn main() {
             .sum();
 
         let percent = (completed_blocks as f64 / total_blocks as f64) * 100.0;
+        let connected_peers = progress.lock().unwrap().connected_peers.len();
         print!(
-            "\rProgress - {}/{} blocks ({:.2}%)",
-            completed_blocks, total_blocks, percent
+            "\rProgress - {}/{} blocks ({:.2}%) - Connected Peers: {}",
+            completed_blocks, total_blocks, percent, connected_peers
         );
         std::io::stdout().flush().unwrap();
 
@@ -192,6 +201,53 @@ fn main() {
             .all(|p| matches!(p.1, PieceProgress::Completed(_)))
         {
             break;
+        }
+
+        if connected_peers < 100 {
+            let peers = get_peers_from_torrent(&torrent).expect("Failed to get peers from torrent");
+            let peers = peers
+                .into_iter()
+                .filter(|p| !progress.lock().unwrap().connected_peers.contains(p))
+                .collect::<Vec<_>>();
+
+            println!("Added {} new peers", peers.len());
+            for peer in peers {
+                if !progress.lock().unwrap().connected_peers.contains(&peer) {
+                    let progress = Arc::clone(&progress);
+                    let torrent = Arc::clone(&torrent);
+                    threads.push(thread::spawn(move || {
+                        progress
+                            .lock()
+                            .unwrap()
+                            .connected_peers
+                            .insert(peer.clone());
+                        match connect_to_peer(&peer, &torrent, progress.clone()) {
+                            Ok(_) => println!(
+                                "Successfully connected to peer: {}:{}",
+                                peer.ip, peer.port
+                            ),
+                            Err(err) => match err {
+                                PeerProtocolError::ReceivedError(e) => {
+                                    println!(
+                                        "Receive error with peer {}:{} - {}",
+                                        peer.ip, peer.port, e
+                                    );
+                                }
+                                PeerProtocolError::Unknown(e) => {
+                                    println!(
+                                        "Unknown error with peer {}:{} - {}",
+                                        peer.ip, peer.port, e
+                                    );
+                                }
+                                _ => {}
+                            },
+                        }
+
+                        // Delete peer from list
+                        progress.lock().unwrap().connected_peers.remove(&peer);
+                    }));
+                }
+            }
         }
 
         std::thread::sleep(std::time::Duration::from_secs(1));

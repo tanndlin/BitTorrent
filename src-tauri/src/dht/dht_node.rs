@@ -46,6 +46,10 @@ impl DhtClient {
     }
 
     pub fn get_peers(&self, info_hash: &[u8; 20]) -> Result<Vec<Peer>, String> {
+        println!(
+            "Starting DHT peer discovery for info_hash: {}",
+            hex::encode(info_hash)
+        );
         let mut peers = vec![];
         let mut queue: Vec<DhtNode> = self.nodes.clone();
         let mut visited = HashSet::new();
@@ -122,10 +126,10 @@ impl DhtClient {
         node: &DhtNode,
         info_hash: &[u8; 20],
     ) -> Result<KRPCRequestGetPeers, String> {
-        println!("Querying DHT node {} for peers", node.location);
+        // println!("Querying DHT node {} for peers", node.location);
         if let Some(node_id) = node.node_id {
             let dist = xor_distance(&node_id, info_hash);
-            println!("Querying {} distance: {}", node.location, hex::encode(dist));
+            // println!("Querying {} distance: {}", node.location, hex::encode(dist));
         }
 
         let req = KRPCRequestGetPeers::new(self.node_id, *info_hash);

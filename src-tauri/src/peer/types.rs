@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use sha1::{Digest, Sha1};
 
-use crate::bencoding::torrent::Torrent;
+use crate::{bencoding::torrent::Torrent, connection::Peer};
 
 #[derive(Debug)]
 pub struct PeerHandshake {
@@ -103,6 +103,7 @@ impl PeerMessage {
 
 pub struct TorrentProgress {
     pub pieces: HashMap<u32, PieceProgress>,
+    pub connected_peers: HashSet<Peer>,
 }
 
 impl From<&Torrent> for TorrentProgress {
@@ -143,7 +144,10 @@ impl From<&Torrent> for TorrentProgress {
             })
             .collect();
 
-        TorrentProgress { pieces }
+        TorrentProgress {
+            pieces,
+            connected_peers: HashSet::new(),
+        }
     }
 }
 
