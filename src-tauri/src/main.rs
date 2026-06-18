@@ -133,11 +133,10 @@ fn main() {
         let completed = completed_pieces.load(SeqCst);
         let percent = (completed as f64 / total_pieces as f64) * 100.0;
         let connected_peers = progress.read().unwrap().connected_peers.len();
-        print!(
-            "\rProgress - {}/{} peices ({:.2}%) - Connected Peers: {}",
+        println!(
+            "Progress - {}/{} peices ({:.2}%) - Connected Peers: {}",
             completed, total_pieces, percent, connected_peers
         );
-        std::io::stdout().flush().unwrap();
 
         // Check if all pieces are complete
         if completed >= total_pieces {

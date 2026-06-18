@@ -54,26 +54,21 @@ pub fn connect_to_peer(
         .write_all(&interested_bytes)
         .expect("Failed to send interested message");
 
-    let mut last_progress_check = Instant::now();
-    let mut download_complete = false;
-
-    loop {
-        if last_progress_check.elapsed() > Duration::from_millis(500) {
-            download_complete = completed_pieces.load(SeqCst) >= torrent.info.pieces.len() as u64;
-            last_progress_check = Instant::now();
-        }
-
-        if download_complete {
-            break;
-        }
-        if let Some(message) = peer_message_stream.try_read_message()? {
+    while completed_pieces.load(SeqCst) <= torrent.info.pieces.len() as u64 {
+        let got_message = if let Some(message) = peer_message_stream.try_read_message()? {
             handle_message(
                 &message,
                 &mut peer_state,
                 progress.clone(),
                 completed_pieces.clone(),
             );
-            continue;
+            true
+        } else {
+            false
+        };
+
+        if !got_message {
+            std::thread::sleep(Duration::from_millis(10));
         }
 
         if !peer_state.is_choked && peer_state.bitfield.is_empty() {
