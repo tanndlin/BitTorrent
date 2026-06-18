@@ -15,11 +15,16 @@ mod util;
 use std::{
     fs::create_dir_all,
     io::Write,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering::SeqCst},
+        Arc, RwLock,
+    },
     thread,
 };
 
 use dotenvy::dotenv;
+use rayon::prelude::*;
+use sha1::{Digest, Sha1};
 
 use crate::{
     bencoding::{
@@ -61,145 +66,81 @@ fn main() {
     dbg!(&torrent.trackers);
 
     let start_time = std::time::Instant::now();
-    let peers = get_peers_from_torrent(&torrent).expect("Failed to get peers from torrent");
-
-    println!("Total peers collected: {}", peers.len());
-    // let peers = peers.into_iter().take(250).collect::<Vec<_>>();
-    // println!("Using {} peers for downloading", peers.len());
-
-    if peers.is_empty() {
-        println!("No peers available to connect to.");
-        return;
-    }
-
-    let progress: Arc<Mutex<TorrentProgress>> = Arc::new(Mutex::new((&torrent).into()));
+    let progress: Arc<RwLock<TorrentProgress>> = Arc::new(RwLock::new((&torrent).into()));
+    let completed_pieces = Arc::new(AtomicU64::new(0));
+    let total_pieces = torrent.info.pieces.len() as u64;
 
     // Find all files in pieces directory
     let pieces_dir = std::env::var("PIECES_DIR").expect("Env var PIECES_DIR not set");
-    for entry in std::fs::read_dir(&pieces_dir).unwrap_or_else(|_| {
-        create_dir_all(&pieces_dir).expect("Failed to create pieces directory");
-        std::fs::read_dir(&pieces_dir).expect("Failed to read pieces directory")
-    }) {
-        let entry = entry.expect("Failed to read directory entry");
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(filename) = path.file_stem() {
-                if let Some(piece_index) = filename.to_str().and_then(|s| s.parse::<u32>().ok()) {
-                    let data = std::fs::read(&path).expect("Failed to read piece file");
-                    // Make sure the piece data is the correct length
-                    let expected_length = torrent.get_piece_length(piece_index as usize);
-                    if data.len() as u32 != expected_length {
-                        println!(
-                            "Warning: Piece file {} has incorrect length (expected {}, got {})",
-                            path.display(),
-                            expected_length,
-                            data.len()
-                        );
-                        continue;
-                    }
-                    progress
-                        .lock()
-                        .unwrap()
-                        .pieces
-                        .insert(piece_index, PieceProgress::Completed(data));
-                }
+    let files: Vec<_> = std::fs::read_dir(&pieces_dir)
+        .unwrap_or_else(|_| {
+            create_dir_all(&pieces_dir).expect("Failed to create pieces directory");
+            std::fs::read_dir(&pieces_dir).expect("Failed to read pieces directory")
+        })
+        .collect();
+
+    let loaded_pieces: Vec<(u32, Vec<u8>)> = files
+        .par_iter()
+        .filter_map(|entry| {
+            let entry = entry.as_ref().expect("Failed to read directory entry");
+            let path = entry.path();
+
+            if !path.is_file() {
+                return None;
             }
-        }
+
+            let piece_index = path.file_stem()?.to_str()?.parse::<u32>().ok()?;
+
+            let data = std::fs::read(&path).expect("Failed to read piece file");
+
+            let expected_length = torrent.get_piece_length(piece_index as usize);
+            if data.len() as u32 != expected_length {
+                println!("Warning: Piece {} incorrect length", piece_index);
+                return None;
+            }
+
+            let expected_hash = torrent.info.pieces[piece_index as usize];
+            let actual_hash: [u8; 20] = Sha1::digest(&data).into();
+            if expected_hash != actual_hash {
+                println!("Warning: Piece {} incorrect hash", piece_index);
+                return None;
+            }
+
+            Some((piece_index, data))
+        })
+        .collect();
+
+    let count = loaded_pieces.len() as u64;
+    let mut prog = progress.write().unwrap();
+    for (piece_index, data) in loaded_pieces {
+        prog.pieces
+            .insert(piece_index, PieceProgress::Completed(data));
     }
+    drop(prog);
+    completed_pieces.fetch_add(count, SeqCst);
 
     println!(
         "Found existing {}/{} pieces",
-        progress
-            .lock()
-            .unwrap()
-            .pieces
-            .iter()
-            .filter(|p| matches!(p.1, PieceProgress::Completed(_)))
-            .count(),
+        completed_pieces.load(SeqCst),
         torrent.info.pieces.len()
     );
 
     let torrent = Arc::new(torrent);
     let mut threads = vec![];
-    for peer in peers {
-        // println!("Attempting to connect to peer: {}:{}", peer.ip, peer.port);
-        let progress = Arc::clone(&progress);
-        let torrent = Arc::clone(&torrent);
-        threads.push(thread::spawn(move || {
-            progress
-                .lock()
-                .unwrap()
-                .connected_peers
-                .insert(peer.clone());
-            match connect_to_peer(&peer, &torrent, progress.clone()) {
-                Ok(_) => println!("Successfully connected to peer: {}:{}", peer.ip, peer.port),
-                Err(err) => match err {
-                    PeerProtocolError::ReceivedError(e) => {
-                        println!("Receive error with peer {}:{} - {}", peer.ip, peer.port, e);
-                    }
-                    PeerProtocolError::Unknown(e) => {
-                        println!("Unknown error with peer {}:{} - {}", peer.ip, peer.port, e);
-                    }
-                    _ => {}
-                },
-            }
-
-            // Delete peer from list
-            progress.lock().unwrap().connected_peers.remove(&peer);
-        }));
-    }
 
     // Every second, print progress until all pieces are complete
-    let total_blocks: u64 = progress
-        .lock()
-        .unwrap()
-        .pieces
-        .iter()
-        .map(|p| match p.1 {
-            PieceProgress::InProgress(piece_progress_data) => piece_progress_data.data.len() as u64,
-            // Estimate completed pieces as full length, even if we don't have all the blocks yet, since we want to show progress as we download blocks for a piece
-            PieceProgress::Completed(_) => {
-                (torrent.get_piece_length(*p.0 as usize) / (torrent.info.piece_length as u32))
-                    as u64
-            }
-        })
-        .sum();
     loop {
-        let completed_blocks: u64 = progress
-            .lock()
-            .unwrap()
-            .pieces
-            .iter()
-            .map(|p| match p.1 {
-                PieceProgress::InProgress(piece_progress_data) => piece_progress_data
-                    .data
-                    .values()
-                    .filter(|b| b.data.is_some())
-                    .count()
-                    as u64,
-                PieceProgress::Completed(_) => {
-                    (torrent.get_piece_length(*p.0 as usize) / (torrent.info.piece_length as u32))
-                        as u64
-                }
-            })
-            .sum();
-
-        let percent = (completed_blocks as f64 / total_blocks as f64) * 100.0;
-        let connected_peers = progress.lock().unwrap().connected_peers.len();
+        let completed = completed_pieces.load(SeqCst);
+        let percent = (completed as f64 / total_pieces as f64) * 100.0;
+        let connected_peers = progress.read().unwrap().connected_peers.len();
         print!(
-            "\rProgress - {}/{} blocks ({:.2}%) - Connected Peers: {}",
-            completed_blocks, total_blocks, percent, connected_peers
+            "\rProgress - {}/{} peices ({:.2}%) - Connected Peers: {}",
+            completed, total_pieces, percent, connected_peers
         );
         std::io::stdout().flush().unwrap();
 
         // Check if all pieces are complete
-        if progress
-            .lock()
-            .unwrap()
-            .pieces
-            .iter()
-            .all(|p| matches!(p.1, PieceProgress::Completed(_)))
-        {
+        if completed >= total_pieces {
             break;
         }
 
@@ -207,25 +148,28 @@ fn main() {
             let peers = get_peers_from_torrent(&torrent).expect("Failed to get peers from torrent");
             let peers = peers
                 .into_iter()
-                .filter(|p| !progress.lock().unwrap().connected_peers.contains(p))
+                .filter(|p| !progress.read().unwrap().connected_peers.contains(p))
                 .collect::<Vec<_>>();
 
             println!("Added {} new peers", peers.len());
             for peer in peers {
-                if !progress.lock().unwrap().connected_peers.contains(&peer) {
+                if !progress.read().unwrap().connected_peers.contains(&peer) {
                     let progress = Arc::clone(&progress);
                     let torrent = Arc::clone(&torrent);
+                    let completed_pieces = Arc::clone(&completed_pieces);
                     threads.push(thread::spawn(move || {
                         progress
-                            .lock()
+                            .write()
                             .unwrap()
                             .connected_peers
                             .insert(peer.clone());
-                        match connect_to_peer(&peer, &torrent, progress.clone()) {
-                            Ok(_) => println!(
-                                "Successfully connected to peer: {}:{}",
-                                peer.ip, peer.port
-                            ),
+                        match connect_to_peer(
+                            &peer,
+                            &torrent,
+                            progress.clone(),
+                            completed_pieces.clone(),
+                        ) {
+                            Ok(_) => {}
                             Err(err) => match err {
                                 PeerProtocolError::ReceivedError(e) => {
                                     println!(
@@ -244,7 +188,7 @@ fn main() {
                         }
 
                         // Delete peer from list
-                        progress.lock().unwrap().connected_peers.remove(&peer);
+                        progress.write().unwrap().connected_peers.remove(&peer);
                     }));
                 }
             }
@@ -272,7 +216,7 @@ fn main() {
     let mut output_file = std::fs::File::create(format!("{}/{}", donwloads_dir, torrent.info.name))
         .expect("Failed to create output file");
     for i in 0..torrent.info.pieces.len() {
-        let progress = progress.lock().unwrap();
+        let progress = progress.read().unwrap();
 
         let piece_data = progress
             .pieces

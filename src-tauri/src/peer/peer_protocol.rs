@@ -15,7 +15,10 @@ use std::{
     fs::create_dir_all,
     io::{Read, Write},
     net::TcpStream,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering::SeqCst},
+        Arc, RwLock,
+    },
     time::{Duration, Instant},
 };
 
@@ -33,7 +36,8 @@ pub enum PeerProtocolError {
 pub fn connect_to_peer(
     peer: &Peer,
     torrent: &Torrent,
-    progress: Arc<Mutex<TorrentProgress>>,
+    progress: Arc<RwLock<TorrentProgress>>,
+    completed_pieces: Arc<AtomicU64>,
 ) -> Result<(), PeerProtocolError> {
     let stream =
         TcpStream::connect((peer.ip, peer.port)).map_err(|_| PeerProtocolError::FailedToConnect)?;
@@ -55,12 +59,7 @@ pub fn connect_to_peer(
 
     loop {
         if last_progress_check.elapsed() > Duration::from_millis(500) {
-            download_complete = progress
-                .lock()
-                .unwrap()
-                .pieces
-                .values()
-                .all(|p| matches!(p, PieceProgress::Completed(_)));
+            download_complete = completed_pieces.load(SeqCst) >= torrent.info.pieces.len() as u64;
             last_progress_check = Instant::now();
         }
 
@@ -68,7 +67,12 @@ pub fn connect_to_peer(
             break;
         }
         if let Some(message) = peer_message_stream.try_read_message()? {
-            handle_message(&message, &mut peer_state, progress.clone());
+            handle_message(
+                &message,
+                &mut peer_state,
+                progress.clone(),
+                completed_pieces.clone(),
+            );
             continue;
         }
 
@@ -84,7 +88,7 @@ pub fn connect_to_peer(
 
         // Choose 5 random pieces that the peer has and that we don't have
         let completed_pieces: HashSet<u32> = {
-            let prog = progress.lock().unwrap();
+            let prog = progress.read().unwrap();
             prog.pieces
                 .iter()
                 .filter(|(_, v)| matches!(v, PieceProgress::Completed(_)))
@@ -105,7 +109,7 @@ pub fn connect_to_peer(
         }
 
         for piece_index in &peer_state.requested_pieces.clone() {
-            let mut torrent_progress = progress.lock().unwrap();
+            let mut torrent_progress = progress.write().unwrap();
             if let PieceProgress::InProgress(piece_progress) =
                 torrent_progress.pieces.get_mut(piece_index).unwrap()
             {
@@ -144,13 +148,12 @@ pub fn connect_to_peer(
 
     // Close stream
     drop(peer_message_stream);
-    println!("Finished downloading all pieces, closing connection to peer");
     Ok(())
 }
 
 fn handle_handshake(
     torrent: &Torrent,
-    progress: &Arc<Mutex<TorrentProgress>>,
+    progress: &Arc<RwLock<TorrentProgress>>,
     peer_message_stream: &mut PeerMessageStream,
     peer: String,
 ) -> Result<PeerState, PeerProtocolError> {
@@ -188,7 +191,7 @@ fn handle_handshake(
         let byte_index = i / 8;
         let bit_index = 7 - (i % 8);
         if let PieceProgress::Completed(_) =
-            progress.lock().unwrap().pieces.get(&(i as u32)).unwrap()
+            progress.read().unwrap().pieces.get(&(i as u32)).unwrap()
         {
             bitfield_payload[byte_index] |= 1 << bit_index;
         }
@@ -229,7 +232,8 @@ fn write_piece_to_file(progress: &TorrentProgress, piece_index: u32) {
 fn handle_message(
     message: &PeerMessage,
     peer_state: &mut PeerState,
-    progress: Arc<Mutex<TorrentProgress>>,
+    progress: Arc<RwLock<TorrentProgress>>,
+    completed_pieces: Arc<AtomicU64>,
 ) {
     // println!("Message ID: {:?}, Length: {}", message.id, message.length);
 
@@ -290,7 +294,7 @@ fn handle_message(
             // );
             peer_state.inflight = peer_state.inflight.saturating_sub(1);
 
-            let mut progress = progress.lock().unwrap();
+            let mut progress = progress.write().unwrap();
             let final_data = if let Some(PieceProgress::InProgress(piece_progress)) =
                 progress.pieces.get_mut(&index)
             {
@@ -334,6 +338,7 @@ fn handle_message(
                     .pieces
                     .insert(index, PieceProgress::Completed(data));
                 write_piece_to_file(&progress, index);
+                completed_pieces.fetch_add(1, SeqCst);
             }
         }
         PeerMessageID::Cancel => {
