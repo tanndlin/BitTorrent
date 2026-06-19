@@ -5,9 +5,7 @@ import TorrentsContainer from './TorrentsContainer';
 function App() {
     return (
         <TorrentProvider>
-            <main>
-                <TorrentsContainer />
-            </main>
+            <TorrentsContainer />
         </TorrentProvider>
     );
 }

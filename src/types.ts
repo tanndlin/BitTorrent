@@ -1,19 +1,20 @@
 export type Torrent = {
     trackers: Tracker[];
     info: Info;
+    info_hash: number[];
 };
 
 type Info = {
     name: string;
     piece_length: number;
-    pieces: string[];
+    pieces: number[][];
     length?: number;
-    files?: File[];
+    files?: TorrentFile[];
 };
 
-type File = {
+type TorrentFile = {
     length: number;
-    path: string;
+    path: string[];
 };
 
 export type Tracker = HTTPTracker | UDPTracker | DHTTracker;

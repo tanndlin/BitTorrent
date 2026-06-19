@@ -18,9 +18,6 @@ const TorrentProvider: FC<Props> = ({ children }) => {
         JSON.parse(localStorage.getItem('torrents') ?? JSON.stringify([]))
     );
 
-    console.log(torrents);
-    console.log(setTorrents);
-
     React.useEffect(() => {
         localStorage.setItem('torrents', JSON.stringify(torrents));
     }, [torrents]);
