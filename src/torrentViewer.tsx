@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import prettyBytes from 'pretty-bytes';
 import { useState } from 'react';
 import { Torrent } from './types';
+import { getTrackerURL } from './util';
 
 type Props = {
     torrent: Torrent;
@@ -13,9 +14,13 @@ const torrentViewer = (props: Props) => {
 
     const checkTracker = () => {
         console.log('Checking trackers...');
-        const results = torrent.trackers.map((tracker) =>
-            invoke('check_tracker', { url: tracker })
+        const results = torrent.trackers
+            .map(getTrackerURL)
+            .map((tracker) =>
+            invoke('check_tracker', { url:tracker })
         );
+
+        console.log(torrent.trackers.map(getTrackerURL));
 
         Promise.all(results).then((statuses) => {
             setTrackerStatuses(statuses as boolean[]);
@@ -23,14 +28,16 @@ const torrentViewer = (props: Props) => {
         });
     };
 
+        console.log(torrent.trackers);
+
     return (
         <tr>
             <td>{torrent.info.name}</td>
             <td>
                 <select>
                     {torrent.trackers.map((tracker, index) => (
-                        <option key={index} value={tracker}>
-                            {tracker}
+                        <option key={index} value={getTrackerURL(tracker)}>
+                            {getTrackerURL(tracker)}
                         </option>
                     ))}
                 </select>

@@ -40,26 +40,31 @@ use crate::{
 };
 
 fn main() {
-    // bittorrent_lib::run();
+    bittorrent_lib::run();
     dotenv().ok();
 
-    let search_dir = std::env::var("TORRENT_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| {
-            let exe_path = std::env::current_exe().expect("Failed to get current exe path");
-            exe_path
-                .parent()
-                .expect("Failed to get parent directory")
-                .to_path_buf()
-        });
-    let pattern = search_dir.join("*.torrent");
-    println!("Searching for .torrent files in: {}", pattern.display());
+    // let search_dir = std::env::var("TORRENT_DIR")
+    //     .map(std::path::PathBuf::from)
+    //     .unwrap_or_else(|_| {
+    //         let exe_path = std::env::current_exe().expect("Failed to get current exe path");
+    //         exe_path
+    //             .parent()
+    //             .expect("Failed to get parent directory")
+    //             .to_path_buf()
+    //     });
+    // let pattern = search_dir.join("*.torrent");
+    // println!("Searching for .torrent files in: {}", pattern.display());
 
-    let path = glob::glob(pattern.to_str().unwrap())
-        .expect("Failed to read glob pattern")
-        .next()
-        .expect("No .torrent files found")
-        .expect("Failed to read path");
+    // let path = glob::glob(pattern.to_str().unwrap())
+    //     .expect("Failed to read glob pattern")
+    //     .next()
+    //     .expect("No .torrent files found")
+    //     .expect("Failed to read path");
+    // println!("Found .torrent file: {}", path.display());
+    // download_torrent(path.to_str().unwrap());
+}
+
+fn download_torrent(path: &str) {
     let content = std::fs::read(path).expect("Failed to read file");
     let torrent = decode::parse_metainfo(&content);
 

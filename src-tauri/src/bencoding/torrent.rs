@@ -1,5 +1,3 @@
-use std::{collections::HashMap, hash::Hash};
-
 use serde::{Deserialize, Serialize};
 
 pub static DICTIONARY_START: u8 = b'd';
@@ -61,6 +59,7 @@ impl Torrent {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Tracker {
     Http(String),
     Udp(String),
