@@ -16,10 +16,7 @@ use crate::{
     },
     connection::{Event, HTTPResponse, Peer, ToUrl, TrackerRequest, TrackerResponse},
     dht::dht_node::DhtClient,
-    peer::{
-        peer_protocol::{connect_to_peer, PeerProtocolError},
-        types::TorrentProgress,
-    },
+    peer::{connect_to_peer, PeerProtocolError, TorrentProgress},
 };
 
 const PEER_RETRY_DELAY: Duration = Duration::from_secs(30);

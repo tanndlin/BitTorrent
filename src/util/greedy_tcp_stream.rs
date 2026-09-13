@@ -1,6 +1,6 @@
 use std::{io::Read, net::TcpStream};
 
-use crate::peer::peer_protocol::PeerProtocolError;
+use crate::peer::PeerProtocolError;
 
 pub type MessageParser<T> = Box<dyn FnMut(&[u8]) -> Option<(T, usize)>>;
 
