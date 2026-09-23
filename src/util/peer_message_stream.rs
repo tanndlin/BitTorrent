@@ -2,7 +2,7 @@ use std::{io::Write, net::TcpStream};
 
 use crate::{
     peer::{PeerMessage, PeerMessageID, PeerProtocolError},
-    util::greedy_tcp_stream::{GreedyTcpStream, MessageParser},
+    util::greedy_tcp_stream::GreedyTcpStream,
 };
 
 pub struct PeerMessageStream {
@@ -11,12 +11,11 @@ pub struct PeerMessageStream {
 
 impl PeerMessageStream {
     pub fn new(stream: TcpStream) -> Self {
-        let parser: MessageParser<PeerMessage> = Box::new(parse_next_peer_message);
         Self {
             stream: GreedyTcpStream {
                 stream,
                 bytes_left: Vec::new(),
-                parser,
+                parser: parse_next_peer_message,
             },
         }
     }

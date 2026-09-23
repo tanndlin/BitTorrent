@@ -2,12 +2,10 @@ use std::{io::Read, net::TcpStream};
 
 use crate::peer::PeerProtocolError;
 
-pub type MessageParser<T> = Box<dyn FnMut(&[u8]) -> Option<(T, usize)>>;
-
 pub struct GreedyTcpStream<T> {
     pub stream: TcpStream,
     pub bytes_left: Vec<u8>,
-    pub parser: MessageParser<T>,
+    pub parser: fn(&[u8]) -> Option<(T, usize)>,
 }
 
 impl<T> GreedyTcpStream<T> {
