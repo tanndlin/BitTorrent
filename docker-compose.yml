@@ -1,17 +1,17 @@
 services:
   bittorrent-client:
-    build: src-tauri
+    build: .
     container_name: bittorrent-client
     depends_on:
     - opentracker
     develop:
       watch:
       - action: rebuild
-        path: ./src-tauri/src
+        path: ./src
       - action: rebuild
-        path: ./src-tauri/Cargo.toml
+        path: ./Cargo.toml
       - action: rebuild
-        path: ./src-tauri/Cargo.lock
+        path: ./Cargo.lock
     environment:
     - TORRENT_DIR=/torrents
     - PIECES_DIR=/pieces

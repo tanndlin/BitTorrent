@@ -12,7 +12,7 @@ services = {
         "restart": "unless-stopped",
     },
     "bittorrent-client": {
-        "build": "src-tauri",
+        "build": ".",
         "container_name": "bittorrent-client",
         "depends_on": ["opentracker"],
         "environment": ["TORRENT_DIR=/torrents"],
@@ -23,9 +23,9 @@ services = {
         ],
         "develop": {
             "watch": [
-                {"action": "rebuild", "path": "./src-tauri/src"},
-                {"action": "rebuild", "path": "./src-tauri/Cargo.toml"},
-                {"action": "rebuild", "path": "./src-tauri/Cargo.lock"},
+                {"action": "rebuild", "path": "./src"},
+                {"action": "rebuild", "path": "./Cargo.toml"},
+                {"action": "rebuild", "path": "./Cargo.lock"},
             ]
         }
     },

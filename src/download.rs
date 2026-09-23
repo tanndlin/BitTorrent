@@ -12,9 +12,11 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sha1::{Digest, Sha1};
 
 use crate::{
-    bencoding::torrent::{Torrent, Tracker},
+    bencoding::{
+        decode,
+        torrent::{Torrent, Tracker},
+    },
     connection::{Event, HTTPResponse, Peer, ToUrl, TrackerRequest, TrackerResponse},
-    decode,
     dht::dht_node::DhtClient,
     peer::{
         peer_protocol::{connect_to_peer, PeerProtocolError},

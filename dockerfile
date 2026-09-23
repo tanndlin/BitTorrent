@@ -5,14 +5,14 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 
 # Build deps only using dummy src — this layer is cached until Cargo.toml/Cargo.lock changes
-RUN mkdir -p src && echo "fn main() {}" > src/main.rs && echo "" > src/lib.rs
-RUN cargo build --release --no-default-features --bin bittorrent
+RUN mkdir -p src && echo "fn main() {}" > src/main.rs
+RUN cargo build --release --bin bittorrent
 RUN rm -rf src
 
 # Copy real source and touch main.rs so cargo knows to recompile
 COPY src ./src
 RUN touch src/main.rs
-RUN cargo build --release --no-default-features --bin bittorrent
+RUN cargo build --release --bin bittorrent
 
 # ---------- runtime ----------
 FROM debian:trixie-slim

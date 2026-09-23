@@ -1,5 +1,4 @@
 use rand::seq::IteratorRandom;
-// use tauri::http::request;
 
 use crate::{
     bencoding::{self, torrent::Torrent},
