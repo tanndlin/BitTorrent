@@ -1,5 +1,6 @@
 use core::panic;
 use std::{
+    collections::HashMap,
     fmt::Display,
     net::{IpAddr, Ipv4Addr, ToSocketAddrs, UdpSocket},
 };
@@ -116,86 +117,50 @@ pub struct TrackerResponseGood {
 
 impl HTTPResponse for TrackerResponse {
     fn from_http_response(response: &[u8]) -> Self {
-        let map = match decode_dictionary(response, &mut 0).unwrap() {
+        let mut map = match decode_dictionary(response, &mut 0).unwrap() {
             Value::Dict(d) => d,
             _ => panic!("Expected a dictionary at the top level"),
         };
         // dbg!(&map);
 
-        if map.contains_key("failure reason") {
-            let reason = if let Value::Str(s) = &map["failure reason"] {
-                s.clone()
-            } else {
-                "".to_string()
-            };
+        if let Some(Value::Str(failure_reason)) = map.remove("failure reason") {
             TrackerResponse {
-                failure: Some(TrackerResponseError {
-                    failure_reason: reason,
-                }),
+                failure: Some(TrackerResponseError { failure_reason }),
                 success: None,
             }
         } else {
-            let warning_message = if let Some(Value::Str(s)) = map.get("warning message") {
-                Some(s.clone())
-            } else {
-                None
-            };
-
-            let interval = if let Value::Number(n) = &map["interval"] {
-                *n as u32
-            } else {
-                0
-            };
-
-            let min_interval = if let Some(Value::Number(n)) = map.get("min interval") {
-                Some(*n as u32)
-            } else {
-                None
-            };
-
-            // let tracker_id = if let Some(Value::Str(s)) = map.get("tracker id") {
-            //     s.clone()
-            // } else {
-            //     panic!("No tracker id in response");
-            // };
-
-            let tracker_id = if let Some(Value::Str(s)) = map.get("tracker id") {
-                Some(s.clone())
-            } else {
-                None
-            };
-
-            let complete = if let Some(Value::Number(n)) = map.get("complete") {
-                Some(*n as u32)
-            } else {
-                None
-            };
-
-            let incomplete = if let Some(Value::Number(n)) = map.get("incomplete") {
-                Some(*n as u32)
-            } else {
-                None
-            };
-
-            let peers = if let Value::Peers(s) = &map["peers"] {
-                s.iter().map(|x| Peer::from(*x)).collect()
-            } else {
-                vec![]
+            let peers = match map.remove("peers") {
+                Some(Value::Peers(p)) => p.into_iter().map(Peer::from).collect(),
+                _ => vec![],
             };
 
             TrackerResponse {
                 failure: None,
                 success: Some(TrackerResponseGood {
-                    _warning_message: warning_message,
-                    _interval: interval,
-                    _min_interval: min_interval,
-                    _tracker_id: tracker_id,
-                    _complete: complete,
-                    _incomplete: incomplete,
+                    _warning_message: take_str(&mut map, "warning message"),
+                    _interval: take_u32(&mut map, "interval").unwrap_or(0),
+                    _min_interval: take_u32(&mut map, "min interval"),
+                    _tracker_id: take_str(&mut map, "tracker id"),
+                    _complete: take_u32(&mut map, "complete"),
+                    _incomplete: take_u32(&mut map, "incomplete"),
                     peers,
                 }),
             }
         }
+    }
+}
+
+fn take_str(map: &mut HashMap<String, Value>, key: &str) -> Option<String> {
+    match map.remove(key)? {
+        Value::Str(s) => Some(s),
+        _ => None,
+    }
+}
+
+fn take_u32(map: &mut HashMap<String, Value>, key: &str) -> Option<u32> {
+    match map.remove(key)? {
+        Value::Number(n) => Some(n as u32),
+        _ => None,
     }
 }
 
