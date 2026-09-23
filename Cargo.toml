@@ -19,3 +19,8 @@ urlencoding = "2.1.3"
 hex = "0.4.3"
 rayon = "1.12.0"
 clap = { version = "4.6.7", features = ["derive"] }
+
+# Release build with debug symbols, for samply: `cargo build --profile profiling`
+[profile.profiling]
+inherits = "release"
+debug = true

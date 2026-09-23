@@ -14,6 +14,33 @@ COPY src ./src
 RUN touch src/main.rs
 RUN cargo build --release --bin bittorrent
 
+# ---------- profiling ----------
+# Built only when targeted (`docker compose run bittorrent-profiler`); release + debug symbols, run under samply
+FROM rust:latest AS profiling-builder
+WORKDIR /app
+
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir -p src && echo "fn main() {}" > src/main.rs
+RUN cargo build --profile profiling --bin bittorrent
+RUN rm -rf src
+
+COPY src ./src
+RUN touch src/main.rs
+RUN cargo build --profile profiling --bin bittorrent
+
+FROM debian:trixie-slim AS profiling
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y ca-certificates libssl3 curl xz-utils && rm -rf /var/lib/apt/lists/*
+RUN curl -sSL https://github.com/mstange/samply/releases/download/samply-v0.13.1/samply-x86_64-unknown-linux-gnu.tar.xz \
+    | tar -xJ --strip-components=1 -C /usr/local/bin samply-x86_64-unknown-linux-gnu/samply
+
+COPY --from=profiling-builder /app/target/profiling/bittorrent /app/bittorrent
+
+# samply refuses to run while perf_event_paranoid > 1; the container is privileged so it can lower it.
+# --presymbolicate writes symbols next to the profile so `samply load` works on the host
+ENTRYPOINT ["sh", "-c", "echo 1 > /proc/sys/kernel/perf_event_paranoid && exec samply record --save-only --unstable-presymbolicate -o /profiles/profile.json.gz -- /app/bittorrent \"$@\"", "--"]
+
 # ---------- runtime ----------
 FROM debian:trixie-slim
 WORKDIR /app

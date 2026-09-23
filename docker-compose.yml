@@ -19,6 +19,23 @@ services:
     # RAM-backed so test downloads don't hit the disk; wiped when the container stops
     tmpfs:
       - /downloads:size=4g
+  # Same client under samply; writes docker/profiles/profile.json.gz (open with `samply load`)
+  bittorrent-profiler:
+    build:
+      context: .
+      target: profiling
+    container_name: bittorrent-profiler
+    init: true
+    # perf_event_open is blocked by Docker's default seccomp profile and capabilities
+    privileged: true
+    depends_on:
+      - opentracker
+    working_dir: /downloads
+    volumes:
+      - ./docker/torrents:/torrents
+      - ./docker/profiles:/profiles
+    tmpfs:
+      - /downloads:size=4g
   opentracker:
     container_name: opentracker
     image: wiltonsr/opentracker:open

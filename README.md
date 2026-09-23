@@ -34,3 +34,18 @@ docker compose run --rm --build bittorrent-client --torrent /torrents/<file>.tor
 ```
 
 Downloads land in `docker/client/downloads`.
+
+## Profiling
+
+Build with the `profiling` profile (release optimizations plus debug symbols),
+then record with [samply](https://github.com/mstange/samply)
+(`cargo install samply`). On Windows, samply must run from an Administrator
+terminal.
+
+```sh
+cargo build --profile profiling
+samply record -- target/profiling/bittorrent --torrent path/to/file.torrent
+```
+
+Stop the client with Ctrl+C when you have enough samples; samply then opens the
+profile in the Firefox Profiler.
