@@ -3,8 +3,8 @@ use std::{collections::HashMap, vec};
 use crate::bencoding::{
     decode::Value,
     torrent::{
-        File, Info, Torrent, COLON, DICTIONARY_END, DICTIONARY_START, INTEGER_END, INTEGER_START,
-        LIST_END, LIST_START,
+        Torrent, COLON, DICTIONARY_END, DICTIONARY_START, INTEGER_END, INTEGER_START, LIST_END,
+        LIST_START,
     },
 };
 

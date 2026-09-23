@@ -1,7 +1,5 @@
 use std::{
     collections::HashMap,
-    env,
-    fs::create_dir_all,
     io::Write,
     sync::{
         atomic::{AtomicU64, Ordering::SeqCst},
@@ -10,9 +8,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use sha1::{Digest, Sha1};
 
 use crate::{
     bencoding::{
@@ -23,7 +18,7 @@ use crate::{
     dht::dht_node::DhtClient,
     peer::{
         peer_protocol::{connect_to_peer, PeerProtocolError},
-        types::{PieceProgress, TorrentProgress},
+        types::TorrentProgress,
     },
 };
 
@@ -43,55 +38,13 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
     let progress: Arc<RwLock<TorrentProgress>> = Arc::new(RwLock::new((&torrent).into()));
     let total_pieces = torrent.info.pieces.len() as u64;
 
-    // Find all files in pieces directory
-    let pieces_dir = env::temp_dir().join("pieces");
-    println!("Using pieces directory: {}", pieces_dir.display());
-
-    let files: Vec<_> = std::fs::read_dir(&pieces_dir)
-        .unwrap_or_else(|_| {
-            create_dir_all(&pieces_dir).expect("Failed to create pieces directory");
-            std::fs::read_dir(&pieces_dir).expect("Failed to read pieces directory")
-        })
-        .collect();
-
-    println!("Found {} files in pieces directory", files.len());
-    println!("Loading existing pieces from pieces directory...");
-    let loaded_pieces: Vec<(u32, Vec<u8>)> = files
-        .par_iter()
-        .filter_map(|entry| {
-            let entry = entry.as_ref().expect("Failed to read directory entry");
-            let path = entry.path();
-
-            if !path.is_file() {
-                return None;
-            }
-
-            let piece_index = path.file_stem()?.to_str()?.parse::<u32>().ok()?;
-
-            // Check length
-            let expected_length = torrent.get_piece_length(piece_index as usize);
-            if entry.metadata().ok()?.len() != expected_length as u64 {
-                println!("Warning: Piece {} incorrect length", piece_index);
-                return None;
-            }
-
-            let data = std::fs::read(&path).expect("Failed to read piece file");
-            Some((piece_index, data))
-        })
-        .collect();
-
-    let count = loaded_pieces.len() as u64;
-    let mut prog = progress.write().unwrap();
-    for (piece_index, data) in loaded_pieces {
-        prog.pieces
-            .insert(piece_index, PieceProgress::Completed(data));
-    }
-    drop(prog);
-    completed_pieces.fetch_add(count, SeqCst);
+    let loaded_pieces = progress.read().unwrap().journal.num_written_pieces();
+    println!("{loaded_pieces} pieces already downloaded");
+    completed_pieces.fetch_add(loaded_pieces as u64, SeqCst);
 
     println!(
         "Found existing {}/{} pieces",
-        completed_pieces.load(SeqCst),
+        loaded_pieces,
         torrent.info.pieces.len()
     );
 
@@ -199,26 +152,6 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
         "Download complete! Time taken: {:.2?}",
         end_time.duration_since(start_time)
     );
-
-    // Build file from pieces
-    let mut output_file =
-        std::fs::File::create(&torrent.info.name).expect("Failed to create output file");
-    for i in 0..torrent.info.pieces.len() {
-        let progress = progress.read().unwrap();
-
-        let piece_data = progress
-            .pieces
-            .get(&(i as u32))
-            .expect("Missing piece data")
-            .get_final_data()
-            .expect("Piece failed hash check")
-            .expect("Piece data is incomplete");
-        output_file
-            .write_all(&piece_data)
-            .expect("Failed to write piece data to output file");
-    }
-
-    println!("File saved successfully!");
 }
 
 fn get_peers_from_torrent(

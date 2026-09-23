@@ -11,14 +11,13 @@ use crate::{
 };
 use std::{
     collections::HashSet,
-    fs::create_dir_all,
-    io::{Read, Write},
+    io::Read,
     net::{SocketAddr, TcpStream},
     sync::{
         atomic::{AtomicU64, Ordering::SeqCst},
         Arc, RwLock,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 const MAX_INFLIGHT_REQUESTS: u32 = 200;
@@ -92,14 +91,15 @@ pub fn connect_to_peer(
         // Choose 5 random pieces that the peer has and that we don't have
         let completed_pieces: HashSet<u32> = {
             let prog = progress.read().unwrap();
-            prog.pieces
+            prog.journal
+                .pieces_written
                 .iter()
-                .filter(|(_, v)| matches!(v, PieceProgress::Completed(_)))
+                .filter(|(_, v)| **v)
                 .map(|(k, _)| *k)
                 .collect()
         };
 
-        let needed_pieces = (0..torrent.info.pieces.len() as u32)
+        let needed_pieces = (0u32..torrent.info.pieces.len() as u32)
             .filter(|&i| bitfield_contains_piece(&peer_state.bitfield, i))
             .filter(|&i| !completed_pieces.contains(&i));
 
@@ -172,7 +172,9 @@ fn handle_handshake(
     // println!("{} - Sending handshake: {:?}", peer, handshake_bytes);
     peer_message_stream
         .write_all(&handshake_bytes)
-        .map_err(|e| PeerProtocolError::HandshakeError(format!("Failed to send handshake: {}", e)))?;
+        .map_err(|e| {
+            PeerProtocolError::HandshakeError(format!("Failed to send handshake: {}", e))
+        })?;
     let mut response_buf = [0; 68];
     peer_message_stream
         .stream
@@ -190,13 +192,11 @@ fn handle_handshake(
     let num_bitfield_bytes = torrent.info.pieces.len().div_ceil(8);
     let peer_state = PeerState::new(peer, num_bitfield_bytes);
     let mut bitfield_payload = vec![0; num_bitfield_bytes];
-    for i in 0..torrent.info.pieces.len() {
+    for i in 0u32..torrent.info.pieces.len() as u32 {
         let byte_index = i / 8;
         let bit_index = 7 - (i % 8);
-        if let PieceProgress::Completed(_) =
-            progress.read().unwrap().pieces.get(&(i as u32)).unwrap()
-        {
-            bitfield_payload[byte_index] |= 1 << bit_index;
+        if let PieceProgress::Completed = progress.read().unwrap().pieces.get(&i).unwrap() {
+            bitfield_payload[byte_index as usize] |= 1 << bit_index;
         }
     }
     let bitfield_message = PeerMessage {
@@ -212,25 +212,6 @@ fn handle_handshake(
         })?;
 
     Ok(peer_state)
-}
-
-fn write_piece_to_file(progress: &TorrentProgress, piece_index: u32) {
-    let pieces_dir = std::env::temp_dir().join("pieces");
-    create_dir_all(&pieces_dir).expect("Failed to create pieces directory");
-
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(pieces_dir.join(format!("{}.bin", piece_index)))
-        .expect("Failed to open file");
-    file.write_all(
-        &progress.pieces[&piece_index]
-            .get_final_data()
-            .unwrap()
-            .unwrap(),
-    )
-    .expect("Failed to write piece to file");
 }
 
 fn handle_message(
@@ -338,10 +319,7 @@ fn handle_message(
 
             if let Some(data) = final_data {
                 // println!("Completed piece index: {}, writing to file", index);
-                progress
-                    .pieces
-                    .insert(index, PieceProgress::Completed(data));
-                write_piece_to_file(&progress, index);
+                progress.journal.write_piece(index, &data).unwrap();
                 completed_pieces.fetch_add(1, SeqCst);
             }
         }

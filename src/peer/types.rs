@@ -1,8 +1,7 @@
+use sha1::{Digest, Sha1};
 use std::collections::{HashMap, HashSet};
 
-use sha1::{Digest, Sha1};
-
-use crate::{bencoding::torrent::Torrent, connection::Peer};
+use crate::{bencoding::torrent::Torrent, connection::Peer, util::Journal};
 
 #[derive(Debug)]
 pub struct PeerHandshake {
@@ -102,49 +101,65 @@ impl PeerMessage {
 }
 
 pub struct TorrentProgress {
+    pub journal: Journal,
     pub pieces: HashMap<u32, PieceProgress>,
     pub connected_peers: HashSet<Peer>,
 }
 
 impl From<&Torrent> for TorrentProgress {
     fn from(torrent: &Torrent) -> Self {
-        let pieces = torrent
-            .info
-            .pieces
-            .iter()
-            .enumerate()
-            .map(|(i, _)| {
-                let mut data = HashMap::<_, _>::new();
-                let piece_length = torrent.get_piece_length(i);
-                let block_size = 16 * 1024; // 16 KB blocks
-                let mut offset = 0;
-                while offset < piece_length {
-                    let block_length = std::cmp::min(block_size, piece_length - offset);
-                    data.insert(
-                        offset,
-                        BlockProgress {
-                            begin: offset,
-                            length: block_length,
-                            inflight: false,
-                            data: None,
-                        },
-                    );
-                    offset += block_length;
-                }
+        let journal = Journal::new(
+            &torrent.info.name,
+            torrent.total_length() as usize,
+            torrent.info.piece_length as usize,
+        )
+        .unwrap();
 
-                (
-                    i as u32,
-                    PieceProgress::InProgress(PieceProgressData {
-                        index: i as u32,
-                        length: torrent.get_piece_length(i),
-                        data,
-                        expected_hash: torrent.info.pieces[i],
-                    }),
-                )
-            })
-            .collect();
+        let pieces: HashMap<_, _> =
+            (0u32..torrent.total_length().div_ceil(torrent.info.piece_length) as u32)
+                .map(|piece_index| {
+                    let written = journal
+                        .pieces_written
+                        .get(&(piece_index))
+                        .copied()
+                        .unwrap_or(false);
+                    if written {
+                        return (piece_index, PieceProgress::Completed);
+                    }
+
+                    let i = piece_index as usize;
+                    let piece_length = torrent.get_piece_length(i);
+                    let block_size = 16 * 1024; // 16 KB blocks
+                    let mut data = HashMap::new();
+                    let mut offset = 0;
+                    while offset < piece_length {
+                        let block_length = std::cmp::min(block_size, piece_length - offset);
+                        data.insert(
+                            offset,
+                            BlockProgress {
+                                begin: offset,
+                                length: block_length,
+                                inflight: false,
+                                data: None,
+                            },
+                        );
+                        offset += block_length;
+                    }
+
+                    (
+                        piece_index,
+                        PieceProgress::InProgress(PieceProgressData {
+                            index: piece_index,
+                            length: piece_length,
+                            data,
+                            expected_hash: torrent.info.pieces[i],
+                        }),
+                    )
+                })
+                .collect();
 
         TorrentProgress {
+            journal,
             pieces,
             connected_peers: HashSet::new(),
         }
@@ -153,16 +168,7 @@ impl From<&Torrent> for TorrentProgress {
 
 pub enum PieceProgress {
     InProgress(PieceProgressData),
-    Completed(Vec<u8>),
-}
-
-impl PieceProgress {
-    pub fn get_final_data(&self) -> Result<Option<Vec<u8>>, String> {
-        match self {
-            PieceProgress::Completed(data) => Ok(Some(data.clone())),
-            PieceProgress::InProgress(progress) => progress.get_final_data(),
-        }
-    }
+    Completed,
 }
 
 pub struct PieceProgressData {
