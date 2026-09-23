@@ -132,10 +132,10 @@ impl DhtClient {
         info_hash: &[u8; 20],
     ) -> Result<KRPCRequestGetPeers, String> {
         // println!("Querying DHT node {} for peers", node.location);
-        if let Some(node_id) = node.node_id {
-            let dist = xor_distance(&node_id, info_hash);
-            // println!("Querying {} distance: {}", node.location, hex::encode(dist));
-        }
+        // if let Some(node_id) = node.node_id {
+        //     let dist = xor_distance(&node_id, info_hash);
+        //     println!("Querying {} distance: {}", node.location, hex::encode(dist));
+        // }
 
         let req = KRPCRequestGetPeers::new(self.node_id, *info_hash);
         let encoded: Vec<u8> = req.clone().into();
