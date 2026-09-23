@@ -1,7 +1,7 @@
 use rand::seq::IteratorRandom;
 
 use crate::{
-    bencoding::{self, torrent::Torrent},
+    bencoding::torrent::Torrent,
     connection::Peer,
     peer::types::{
         BlockProgress, PeerHandshake, PeerMessage, PeerMessageID, PeerState, PieceProgress,
@@ -286,7 +286,6 @@ fn handle_message(
                 piece_progress.data.insert(
                     begin,
                     BlockProgress {
-                        begin,
                         length: block.len() as u32,
                         inflight: false,
                         data: Some(block.to_vec()),
@@ -347,8 +346,8 @@ fn handle_message(
             };
             // println!("Extension ID: {} ({})", extension_id, extension_id_str);
 
-            let dictionary =
-                bencoding::decode::decode_dictionary(&message.payload[1..], &mut 0usize);
+            // let dictionary =
+            //     bencoding::decode::decode_dictionary(&message.payload[1..], &mut 0usize);
             // println!("Decoded extension message: {:?}", dictionary);
         }
     }

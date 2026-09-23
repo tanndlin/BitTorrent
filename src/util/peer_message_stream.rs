@@ -24,11 +24,6 @@ impl PeerMessageStream {
         }
     }
 
-    // Add a convenience method to get the next peer message
-    pub fn get_next_message(&mut self) -> PeerMessage {
-        self.stream.get_next_message()
-    }
-
     pub fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
         self.stream.stream.write_all(buf)
     }

@@ -67,7 +67,7 @@ fn encode_torrent(torrent: &Torrent) -> Vec<u8> {
 pub fn encode_value(value: &Value) -> Vec<u8> {
     match value {
         Value::Number(n) => encode_number(n),
-        Value::Str(s) => encode_string(&s),
+        Value::Str(s) => encode_string(s),
         Value::Bytes(b) => encode_bytes(b),
         Value::Dict(dict) => encode_dictionary(dict),
         Value::List(l) => encode_list(l),
@@ -93,7 +93,7 @@ pub fn encode_dictionary(dict: &HashMap<String, Value>) -> Vec<u8> {
 fn encode_list(l: &[Value]) -> Vec<u8> {
     let mut ret = vec![LIST_START];
     for value in l {
-        ret.extend_from_slice(&encode_value(&value));
+        ret.extend_from_slice(&encode_value(value));
     }
 
     ret.push(LIST_END);

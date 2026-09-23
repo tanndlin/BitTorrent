@@ -137,7 +137,6 @@ impl From<&Torrent> for TorrentProgress {
                         data.insert(
                             offset,
                             BlockProgress {
-                                begin: offset,
                                 length: block_length,
                                 inflight: false,
                                 data: None,
@@ -217,7 +216,6 @@ impl PieceProgressData {
 }
 
 pub struct BlockProgress {
-    pub begin: u32,
     pub length: u32,
     pub inflight: bool,
     pub data: Option<Vec<u8>>,

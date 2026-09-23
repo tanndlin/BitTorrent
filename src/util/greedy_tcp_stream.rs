@@ -1,7 +1,4 @@
-use std::{
-    io::{Read, Write},
-    net::TcpStream,
-};
+use std::{io::Read, net::TcpStream};
 
 use crate::peer::peer_protocol::PeerProtocolError;
 
@@ -14,40 +11,6 @@ pub struct GreedyTcpStream<T> {
 }
 
 impl<T> GreedyTcpStream<T> {
-    pub fn get_next_message(&mut self) -> T {
-        self.stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(120)))
-            .expect("Failed to set read timeout");
-
-        loop {
-            if let Some((message, bytes_used)) = (self.parser)(&self.bytes_left) {
-                self.bytes_left.drain(0..bytes_used);
-                return message;
-            }
-
-            let mut buf = [0; 32768];
-
-            match self.stream.read(&mut buf) {
-                Ok(bytes_read) => {
-                    if bytes_read == 0 {
-                        panic!("Connection closed... read 0 bytes");
-                    }
-
-                    self.bytes_left.extend_from_slice(&buf[..bytes_read]);
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
-                    // Timeout occurred, send keep-alive message
-                    self.stream
-                        .write_all(&[0, 0, 0, 0])
-                        .expect("Failed to send keep-alive");
-                    // println!("Sent keep-alive message");
-                    continue;
-                }
-                Err(e) => panic!("Failed to read from TCP stream: {}", e),
-            }
-        }
-    }
-
     pub fn try_read_message(&mut self) -> Result<Option<T>, PeerProtocolError> {
         // First check already-buffered bytes
         if let Some((message, bytes_used)) = (self.parser)(&self.bytes_left) {

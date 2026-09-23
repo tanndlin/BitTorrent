@@ -382,7 +382,7 @@ pub fn get_info_hash(content: &Vec<u8>, start: usize) -> Result<[u8; 20], String
                 if value == "info" {
                     let start = index;
                     let mut hasher = Sha1::new();
-                    decode_dictionary(content, &mut index); // parse to move the index forward
+                    decode_dictionary(content, &mut index)?; // parse to move the index forward
                     let end = index; // end of the "info" dictionary
                     hasher.update(&content[start..end]);
                     return Ok(hasher.finalize().into());

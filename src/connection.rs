@@ -1,10 +1,7 @@
 use core::panic;
 use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs, UdpSocket};
 
-use crate::{
-    bencoding::decode::{decode_dictionary, Value},
-    peer,
-};
+use crate::bencoding::decode::{decode_dictionary, Value};
 
 pub trait ToUrl {
     fn to_url_params(&self) -> String;
@@ -30,14 +27,14 @@ pub enum Event {
     Stopped = 3,
 }
 
-impl Event {
-    fn to_string(&self) -> &str {
-        match self {
+impl std::fmt::Display for Event {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
             Event::Empty => "empty",
             Event::Completed => "completed",
             Event::Started => "started",
             Event::Stopped => "stopped",
-        }
+        })
     }
 }
 
@@ -81,10 +78,10 @@ impl ToUrl for TrackerRequest {
             self.left,
             self.compact,
             self.no_peer_id as u8,
-            self.event.to_string(),
+            self.event,
             self.ip.map_or("".to_string(), |ip| ip.to_string()),
-            self.num_want.map_or(-1, |n| n),
-            self.key.map_or(0, |k| k),
+            self.num_want.unwrap_or(-1),
+            self.key.unwrap_or(0),
             self.tracker_id.as_deref().unwrap_or(""),
         )
     }
@@ -245,9 +242,9 @@ pub struct Peer {
     pub port: u16,
 }
 
-impl Peer {
-    pub fn to_string(&self) -> String {
-        format!("{}:{}", self.ip, self.port)
+impl std::fmt::Display for Peer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.ip, self.port)
     }
 }
 
