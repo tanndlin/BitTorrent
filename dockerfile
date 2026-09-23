@@ -25,4 +25,4 @@ COPY --from=builder /app/target/release/bittorrent /app/bittorrent
 EXPOSE 6881/tcp
 EXPOSE 6881/udp
 
-CMD ["/app/bittorrent"]
+ENTRYPOINT ["/app/bittorrent"]

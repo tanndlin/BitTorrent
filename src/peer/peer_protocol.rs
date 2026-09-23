@@ -13,7 +13,7 @@ use std::{
     collections::HashSet,
     fs::create_dir_all,
     io::{Read, Write},
-    net::TcpStream,
+    net::{SocketAddr, TcpStream},
     sync::{
         atomic::{AtomicU64, Ordering::SeqCst},
         Arc, RwLock,
@@ -22,6 +22,7 @@ use std::{
 };
 
 const MAX_INFLIGHT_REQUESTS: u32 = 200;
+const IO_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
 pub enum PeerProtocolError {
@@ -38,8 +39,16 @@ pub fn connect_to_peer(
     progress: Arc<RwLock<TorrentProgress>>,
     completed_pieces: Arc<AtomicU64>,
 ) -> Result<(), PeerProtocolError> {
-    let stream =
-        TcpStream::connect((peer.ip, peer.port)).map_err(|_| PeerProtocolError::FailedToConnect)?;
+    let stream = TcpStream::connect_timeout(&SocketAddr::new(peer.ip, peer.port), IO_TIMEOUT)
+        .map_err(|_| PeerProtocolError::FailedToConnect)?;
+    // Without these, a peer that accepts the connection but never answers the
+    // handshake (or stops reading) blocks this thread forever
+    stream
+        .set_read_timeout(Some(IO_TIMEOUT))
+        .map_err(|_| PeerProtocolError::FailedToConnect)?;
+    stream
+        .set_write_timeout(Some(IO_TIMEOUT))
+        .map_err(|_| PeerProtocolError::FailedToConnect)?;
     let peer = format!("{}:{}", peer.ip, peer.port);
     // println!("{} - Connected", peer);
 
@@ -51,9 +60,9 @@ pub fn connect_to_peer(
     // println!("Sending interested message: {:?}", interested_bytes);
     peer_message_stream
         .write_all(&interested_bytes)
-        .expect("Failed to send interested message");
+        .map_err(|_| PeerProtocolError::ConnectionClosed)?;
 
-    while completed_pieces.load(SeqCst) <= torrent.info.pieces.len() as u64 {
+    while completed_pieces.load(SeqCst) < torrent.info.pieces.len() as u64 {
         let got_message = if let Some(message) = peer_message_stream.try_read_message()? {
             handle_message(
                 &message,
@@ -128,7 +137,7 @@ pub fn connect_to_peer(
 
                     peer_message_stream
                         .write_all(&Vec::from(&request_message))
-                        .expect("Failed to send request message");
+                        .map_err(|_| PeerProtocolError::ConnectionClosed)?;
 
                     // Mark block as inflight
                     block_progress.inflight = true;
@@ -163,7 +172,7 @@ fn handle_handshake(
     // println!("{} - Sending handshake: {:?}", peer, handshake_bytes);
     peer_message_stream
         .write_all(&handshake_bytes)
-        .expect("Failed to send handshake");
+        .map_err(|e| PeerProtocolError::HandshakeError(format!("Failed to send handshake: {}", e)))?;
     let mut response_buf = [0; 68];
     peer_message_stream
         .stream
@@ -206,13 +215,14 @@ fn handle_handshake(
 }
 
 fn write_piece_to_file(progress: &TorrentProgress, piece_index: u32) {
-    create_dir_all("/pieces").expect("Failed to create pieces directory");
+    let pieces_dir = std::env::temp_dir().join("pieces");
+    create_dir_all(&pieces_dir).expect("Failed to create pieces directory");
 
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
-        .open(format!("/pieces/{}.bin", piece_index))
+        .open(pieces_dir.join(format!("{}.bin", piece_index)))
         .expect("Failed to open file");
     file.write_all(
         &progress.pieces[&piece_index]

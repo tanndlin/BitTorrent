@@ -118,7 +118,7 @@ impl HTTPResponse for TrackerResponse {
             Value::Dict(d) => d,
             _ => panic!("Expected a dictionary at the top level"),
         };
-        dbg!(&map);
+        // dbg!(&map);
 
         if map.contains_key("failure reason") {
             let reason = if let Value::Str(s) = &map["failure reason"] {

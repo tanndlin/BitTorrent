@@ -1,4 +1,6 @@
 use std::{
+    collections::HashMap,
+    env,
     fs::create_dir_all,
     io::Write,
     sync::{
@@ -6,6 +8,7 @@ use std::{
         Arc, RwLock,
     },
     thread,
+    time::{Duration, Instant},
 };
 
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -24,6 +27,9 @@ use crate::{
     },
 };
 
+const PEER_RETRY_DELAY: Duration = Duration::from_secs(30);
+const TRACKER_RETRY_DELAY: Duration = Duration::from_secs(60);
+
 pub fn download_torrent_from_path(path: &str) {
     let content = std::fs::read(path).expect("Failed to read file");
     let torrent = decode::parse_metainfo(&content);
@@ -38,7 +44,9 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
     let total_pieces = torrent.info.pieces.len() as u64;
 
     // Find all files in pieces directory
-    let pieces_dir = std::env::var("PIECES_DIR").expect("Env var PIECES_DIR not set");
+    let pieces_dir = env::temp_dir().join("pieces");
+    println!("Using pieces directory: {}", pieces_dir.display());
+
     let files: Vec<_> = std::fs::read_dir(&pieces_dir)
         .unwrap_or_else(|_| {
             create_dir_all(&pieces_dir).expect("Failed to create pieces directory");
@@ -93,42 +101,67 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
     );
 
     let torrent = Arc::new(torrent);
-    let mut threads = vec![];
+    let mut last_attempt: HashMap<Peer, Instant> = HashMap::new();
+    let mut failed_trackers: HashMap<String, Instant> = HashMap::new();
+
+    println!();
 
     // Every second, print progress until all pieces are complete
     loop {
         let completed = completed_pieces.load(SeqCst);
         let percent = (completed as f64 / total_pieces as f64) * 100.0;
         let connected_peers = progress.read().unwrap().connected_peers.len();
-        println!(
-            "Progress - {}/{} peices ({:.2}%) - Connected Peers: {}",
+        print!(
+            "\rProgress - {}/{} peices ({:.2}%) - Connected Peers: {}",
             completed, total_pieces, percent, connected_peers
         );
+        std::io::stdout().flush().unwrap();
 
         // Check if all pieces are complete
         if completed >= total_pieces {
+            println!();
             break;
         }
 
         if connected_peers < 100 {
-            let peers = get_peers_from_torrent(&torrent).expect("Failed to get peers from torrent");
+            let peers = get_peers_from_torrent(&torrent, &mut failed_trackers)
+                .expect("Failed to get peers from torrent");
+            // Skip peers tried recently, otherwise a peer that refuses connections
+            // (like our own announced address) gets retried every second
+            let now = Instant::now();
             let peers = peers
                 .into_iter()
                 .filter(|p| !progress.read().unwrap().connected_peers.contains(p))
+                .filter(|p| {
+                    last_attempt
+                        .get(p)
+                        .is_none_or(|t| now.duration_since(*t) >= PEER_RETRY_DELAY)
+                })
                 .collect::<Vec<_>>();
+            for peer in &peers {
+                last_attempt.insert(peer.clone(), now);
+            }
 
-            println!("Added {} new peers", peers.len());
+            if !peers.is_empty() {
+                println!("Added {} new peers", peers.len());
+
+                dbg!(&progress.read().unwrap().connected_peers);
+                dbg!(&peers);
+            }
+
             for peer in peers {
-                if !progress.read().unwrap().connected_peers.contains(&peer) {
+                // Register before spawning so a peer can't get two threads, and so
+                // one thread's cleanup can't remove another thread's entry
+                if progress
+                    .write()
+                    .unwrap()
+                    .connected_peers
+                    .insert(peer.clone())
+                {
                     let progress = Arc::clone(&progress);
                     let torrent = Arc::clone(&torrent);
                     let completed_pieces = Arc::clone(&completed_pieces);
-                    threads.push(thread::spawn(move || {
-                        progress
-                            .write()
-                            .unwrap()
-                            .connected_peers
-                            .insert(peer.clone());
+                    thread::spawn(move || {
                         match connect_to_peer(
                             &peer,
                             &torrent,
@@ -155,7 +188,7 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
 
                         // Delete peer from list
                         progress.write().unwrap().connected_peers.remove(&peer);
-                    }));
+                    });
                 }
             }
         }
@@ -163,24 +196,18 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
 
-    // Wait for all threads to finish
-    for thread in threads {
-        thread.join().expect("Failed to join thread");
-    }
-
+    // Peer threads aren't joined: every piece is already in `progress`, and a peer
+    // thread stuck on a slow or dead connection shouldn't hold up saving the file
     let end_time = std::time::Instant::now();
 
     println!(
         "Download complete! Time taken: {:.2?}",
         end_time.duration_since(start_time)
     );
-    let donwloads_dir = std::env::var("DOWNLOADS_DIR").unwrap_or_else(|_| "/downloads".to_string());
-    create_dir_all(&donwloads_dir).expect("Failed to create downloads directory");
-    println!("Saving file to downloads directory: {}", donwloads_dir);
 
     // Build file from pieces
-    let mut output_file = std::fs::File::create(format!("{}/{}", donwloads_dir, torrent.info.name))
-        .expect("Failed to create output file");
+    let mut output_file =
+        std::fs::File::create(&torrent.info.name).expect("Failed to create output file");
     for i in 0..torrent.info.pieces.len() {
         let progress = progress.read().unwrap();
 
@@ -199,7 +226,10 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
     println!("File saved successfully!");
 }
 
-fn get_peers_from_torrent(torrent: &Torrent) -> Result<Vec<Peer>, String> {
+fn get_peers_from_torrent(
+    torrent: &Torrent,
+    failed_trackers: &mut HashMap<String, Instant>,
+) -> Result<Vec<Peer>, String> {
     let http_trackers = torrent
         .trackers
         .iter()
@@ -223,24 +253,36 @@ fn get_peers_from_torrent(torrent: &Torrent) -> Result<Vec<Peer>, String> {
         ])
         .collect();
 
-    return get_peers_dht(&torrent.info_hash, dht_trackers);
-
     if http_trackers.is_empty() {
         return get_peers_dht(&torrent.info_hash, dht_trackers);
     }
 
+    let now = Instant::now();
     Ok(http_trackers
+        .into_iter()
+        .filter(|tracker| {
+            failed_trackers
+                .get(tracker)
+                .is_none_or(|t| now.duration_since(*t) >= TRACKER_RETRY_DELAY)
+        })
+        .collect::<Vec<_>>()
         .into_iter()
         .flat_map(|tracker| {
             let response = match get_peers_http(torrent, &tracker) {
-                Ok(res) => res,
+                Ok(res) => {
+                    failed_trackers.remove(&tracker);
+                    res
+                }
                 Err(err) => {
-                    println!("Error getting peers from tracker {}: {}", tracker, err);
+                    // Only report the first failure, not every retry
+                    if failed_trackers.insert(tracker.clone(), now).is_none() {
+                        println!("Error getting peers from tracker {}: {}", tracker, err);
+                    }
                     return vec![];
                 }
             };
 
-            println!("Tracker Response: {:?}", response);
+            // println!("Tracker Response: {:?}", response);
 
             if let Some(err) = response.failure {
                 println!("Tracker failure reason: {:?}", err);
@@ -248,10 +290,10 @@ fn get_peers_from_torrent(torrent: &Torrent) -> Result<Vec<Peer>, String> {
             }
 
             let response = response.success.expect("No success response from tracker");
-            println!("Interval: {}", response.interval);
-            println!("Leechers: {}", response.incomplete.unwrap_or(0));
-            println!("Seeders: {}", response.complete.unwrap_or(0));
-            println!("Peers: {}", response.peers.len());
+            // println!("Interval: {}", response.interval);
+            // println!("Leechers: {}", response.incomplete.unwrap_or(0));
+            // println!("Seeders: {}", response.complete.unwrap_or(0));
+            // println!("Peers: {}", response.peers.len());
 
             if response.peers.is_empty() {
                 println!("No peers available from tracker");
@@ -269,7 +311,7 @@ fn get_peers_dht(info_hash: &[u8; 20], trackers: Vec<String>) -> Result<Vec<Peer
 }
 
 fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, String> {
-    println!("Testing HTTP tracker: {}", tracker);
+    // println!("Testing HTTP tracker: {}", tracker);
 
     let left = if let Some(length) = torrent.info.length {
         length as u64
@@ -295,21 +337,18 @@ fn get_peers_http(torrent: &Torrent, tracker: &str) -> Result<TrackerResponse, S
     };
 
     let url = format!("{}{}", tracker, connection_request.to_url_params());
-    println!("Request URL: {}", url);
-    let response = reqwest::blocking::get(&url).map_err(|_| "Failed to send request")?;
+    // println!("Request URL: {}", url);
+    let response = reqwest::blocking::get(&url).map_err(|e| e.without_url().to_string())?;
     let status = response.status();
-    println!("Response Status: {}", status);
-
-    let bytes = response.bytes().expect("Failed to read bytes");
-    let text = String::from_utf8_lossy(&bytes);
-    println!("Response Body: {:?}", text);
+    // println!("Response Status: {}", status);
 
     if !status.is_success() {
         return Err("Failed to get a successful response from the tracker".to_string());
     }
 
+    let bytes = response.bytes().expect("Failed to read bytes");
     let tracker_response = TrackerResponse::from_http_response(bytes.as_ref());
-    dbg!(&tracker_response);
+    // dbg!(&tracker_response);
 
     Ok(tracker_response)
 }
