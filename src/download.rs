@@ -14,7 +14,7 @@ use crate::{
         decode,
         torrent::{Torrent, Tracker},
     },
-    connection::{Event, HTTPResponse, Peer, ToUrl, TrackerRequest, TrackerResponse},
+    connection::{Event, HTTPResponse, Peer, TrackerRequest, TrackerResponse},
     dht::dht_node::DhtClient,
     peer::{connect_to_peer, PeerProtocolError, TorrentProgress},
 };

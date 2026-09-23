@@ -3,10 +3,6 @@ use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs, UdpSocket};
 
 use crate::bencoding::decode::{decode_dictionary, Value};
 
-pub trait ToUrl {
-    fn to_url_params(&self) -> String;
-}
-
 pub trait HTTPResponse {
     fn from_http_response(response: &[u8]) -> Self;
 }
@@ -54,8 +50,8 @@ pub struct TrackerRequest {
     pub tracker_id: Option<String>,
 }
 
-impl ToUrl for TrackerRequest {
-    fn to_url_params(&self) -> String {
+impl TrackerRequest {
+    pub fn to_url_params(&self) -> String {
         let info_hash_encoded = self
             .info_hash
             .iter()
