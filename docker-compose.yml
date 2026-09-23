@@ -16,7 +16,9 @@ services:
     working_dir: /downloads
     volumes:
       - ./docker/torrents:/torrents
-      - ./docker/client/downloads:/downloads
+    # RAM-backed so test downloads don't hit the disk; wiped when the container stops
+    tmpfs:
+      - /downloads:size=4g
   opentracker:
     container_name: opentracker
     image: wiltonsr/opentracker:open

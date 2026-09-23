@@ -19,8 +19,9 @@ services = {
         "environment": ["TORRENT_DIR=/torrents"],
         "volumes": [
             "./docker/torrents:/torrents",
-            "./docker/client/downloads:/downloads",
         ],
+        # RAM-backed so test downloads don't hit the disk; wiped when the container stops
+        "tmpfs": ["/downloads:size=4g"],
         "develop": {
             "watch": [
                 {"action": "rebuild", "path": "./src"},
