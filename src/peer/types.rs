@@ -24,10 +24,12 @@ impl From<&PeerHandshake> for Vec<u8> {
     }
 }
 
-impl From<[u8; 68]> for PeerHandshake {
-    fn from(bytes: [u8; 68]) -> Self {
+impl TryFrom<[u8; 68]> for PeerHandshake {
+    type Error = String;
+    fn try_from(bytes: [u8; 68]) -> Result<Self, Self::Error> {
         let pstr_len = bytes[0] as usize;
-        let pstr = String::from_utf8(bytes[1..1 + pstr_len].to_vec()).unwrap();
+        let pstr = String::from_utf8(bytes[1..1 + pstr_len].to_vec())
+            .map_err(|_| "Unable to parse PSTR")?;
         let mut reserved = [0; 8];
         reserved.copy_from_slice(&bytes[1 + pstr_len..1 + pstr_len + 8]);
         let mut info_hash = [0; 20];
@@ -35,12 +37,12 @@ impl From<[u8; 68]> for PeerHandshake {
         let mut peer_id = [0; 20];
         peer_id.copy_from_slice(&bytes[1 + pstr_len + 28..1 + pstr_len + 48]);
 
-        PeerHandshake {
+        Ok(PeerHandshake {
             pstr,
             reserved,
             info_hash,
             peer_id,
-        }
+        })
     }
 }
 

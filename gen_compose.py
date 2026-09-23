@@ -1,6 +1,7 @@
 # generate_compose.py
-import yaml
 import sys
+
+import yaml
 
 n = int(sys.argv[1]) if len(sys.argv) > 1 else 2
 
@@ -18,7 +19,6 @@ services = {
         "environment": ["TORRENT_DIR=/torrents"],
         "volumes": [
             "./docker/torrents:/torrents",
-            "./docker/client/pieces:/pieces",
             "./docker/client/downloads:/downloads",
         ],
         "develop": {
@@ -27,7 +27,7 @@ services = {
                 {"action": "rebuild", "path": "./Cargo.toml"},
                 {"action": "rebuild", "path": "./Cargo.lock"},
             ]
-        }
+        },
     },
 }
 
@@ -42,7 +42,7 @@ for i in range(1, n + 1):
             f"WEBUI_PORT={webui_port}",
         ],
         "ports": [
-            f"{webui_port}:{webui_port}", 
+            f"{webui_port}:{webui_port}",
             f"{6880 + i}:{6880 + i}",
             f"{6880 + i}:{6880 + i}/udp",
         ],

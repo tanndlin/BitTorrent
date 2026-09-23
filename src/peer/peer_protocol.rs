@@ -11,6 +11,7 @@ use crate::{
 };
 use std::{
     collections::HashSet,
+    fmt::Display,
     io::Read,
     net::{SocketAddr, TcpStream},
     sync::{
@@ -30,6 +31,18 @@ pub enum PeerProtocolError {
     HandshakeError(String),
     ReceivedError(String),
     Unknown(String),
+}
+
+impl Display for PeerProtocolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PeerProtocolError::FailedToConnect => f.write_str("Failed to connect"),
+            PeerProtocolError::ConnectionClosed => f.write_str("Connection closed"),
+            PeerProtocolError::HandshakeError(e) => f.write_str(&format!("Handshake error: {}", e)),
+            PeerProtocolError::ReceivedError(e) => f.write_str(&format!("Received error: {}", e)),
+            PeerProtocolError::Unknown(e) => f.write_str(&format!("Unknown error: {}", e)),
+        }
+    }
 }
 
 pub fn connect_to_peer(
@@ -183,11 +196,8 @@ fn handle_handshake(
         .map_err(|e| {
             PeerProtocolError::HandshakeError(format!("Failed to read handshake response: {}", e))
         })?;
-    let handshake_response = PeerHandshake::from(response_buf);
-    // println!(
-    //     "{} - Received handshake response: {:?}",
-    //     peer, handshake_response
-    // );
+
+    PeerHandshake::try_from(response_buf).map_err(PeerProtocolError::HandshakeError)?;
 
     let num_bitfield_bytes = torrent.info.pieces.len().div_ceil(8);
     let peer_state = PeerState::new(peer, num_bitfield_bytes);

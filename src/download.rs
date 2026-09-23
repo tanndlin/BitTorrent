@@ -115,19 +115,8 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
                         ) {
                             Ok(_) => {}
                             Err(err) => match err {
-                                PeerProtocolError::ReceivedError(e) => {
-                                    println!(
-                                        "Receive error with peer {}:{} - {}",
-                                        peer.ip, peer.port, e
-                                    );
-                                }
-                                PeerProtocolError::Unknown(e) => {
-                                    println!(
-                                        "Unknown error with peer {}:{} - {}",
-                                        peer.ip, peer.port, e
-                                    );
-                                }
-                                _ => {}
+                                PeerProtocolError::FailedToConnect => {}
+                                _ => println!("{}", err),
                             },
                         }
 

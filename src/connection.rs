@@ -1,5 +1,8 @@
 use core::panic;
-use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs, UdpSocket};
+use std::{
+    fmt::Display,
+    net::{IpAddr, Ipv4Addr, ToSocketAddrs, UdpSocket},
+};
 
 use crate::bencoding::decode::{decode_dictionary, Value};
 
@@ -94,14 +97,20 @@ pub struct TrackerResponseError {
     pub failure_reason: String,
 }
 
+impl Display for TrackerResponseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.failure_reason)
+    }
+}
+
 #[derive(Debug)]
 pub struct TrackerResponseGood {
-    pub warning_message: Option<String>,
-    pub interval: u32,
-    pub min_interval: Option<u32>,
-    pub tracker_id: Option<String>,
-    pub complete: Option<u32>,
-    pub incomplete: Option<u32>,
+    pub _warning_message: Option<String>,
+    pub _interval: u32,
+    pub _min_interval: Option<u32>,
+    pub _tracker_id: Option<String>,
+    pub _complete: Option<u32>,
+    pub _incomplete: Option<u32>,
     pub peers: Vec<Peer>,
 }
 
@@ -177,12 +186,12 @@ impl HTTPResponse for TrackerResponse {
             TrackerResponse {
                 failure: None,
                 success: Some(TrackerResponseGood {
-                    warning_message,
-                    interval,
-                    min_interval,
-                    tracker_id,
-                    complete,
-                    incomplete,
+                    _warning_message: warning_message,
+                    _interval: interval,
+                    _min_interval: min_interval,
+                    _tracker_id: tracker_id,
+                    _complete: complete,
+                    _incomplete: incomplete,
                     peers,
                 }),
             }
@@ -290,6 +299,7 @@ impl TryFrom<&[u8]> for Peer {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct AnnounceResponse {
     pub action: u32,
@@ -308,7 +318,9 @@ impl From<&[u8]> for AnnounceResponse {
         let leechers = u32::from_be_bytes(bytes[12..16].try_into().unwrap());
         let seeders = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
         let peers: Vec<Peer> = bytes[20..]
-            .chunks_exact(6)
+            .as_chunks::<6>()
+            .0
+            .iter()
             .map(Peer::try_from)
             .filter_map(Result::ok)
             .collect();
@@ -345,6 +357,7 @@ impl From<ScrapeRequest> for Vec<u8> {
     }
 }
 
+#[allow(dead_code)]
 pub struct ScrapeSubresponse {
     pub seeders: u32,
     pub completed: u32,
@@ -361,6 +374,7 @@ impl From<&[u8]> for ScrapeSubresponse {
     }
 }
 
+#[allow(dead_code)]
 pub struct ScrapeResponse {
     pub action: u32,
     pub transaction_id: u32,
@@ -387,6 +401,7 @@ impl From<&[u8]> for ScrapeResponse {
     }
 }
 
+#[allow(dead_code)]
 pub fn check_tracker(url: &str) -> Result<bool, String> {
     if url.starts_with("udp://") {
         check_udp_tracker(url)
@@ -397,6 +412,7 @@ pub fn check_tracker(url: &str) -> Result<bool, String> {
     }
 }
 
+#[allow(dead_code)]
 fn check_udp_tracker(url: &str) -> Result<bool, String> {
     // 1. Bind the UdpSocket to a local address.
     //    "0.0.0.0:0" allows the OS to choose an available port.

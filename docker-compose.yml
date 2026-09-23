@@ -16,7 +16,6 @@ services:
     working_dir: /downloads
     volumes:
       - ./docker/torrents:/torrents
-      - ./docker/client/pieces:/tmp/pieces
       - ./docker/client/downloads:/downloads
   opentracker:
     container_name: opentracker
