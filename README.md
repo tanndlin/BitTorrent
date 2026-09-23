@@ -5,30 +5,32 @@ A BitTorrent client written in Rust, run from the CLI.
 ## Running
 
 ```sh
-cargo run --release -- path/to/file.torrent
+cargo run --release -- --torrent path/to/file.torrent
 ```
 
-If no path is given, the first `*.torrent` file in `TORRENT_DIR` is used (falling
-back to the directory containing the executable).
+The downloaded file is written to the current working directory under the name
+from the torrent's metadata.
 
-## Configuration
-
-Environment variables, read from `.env` if present:
-
-| Variable | Description |
-| --- | --- |
-| `TORRENT_DIR` | Directory searched for a `.torrent` file when none is passed on the command line |
-| `PIECES_DIR` | Where downloaded pieces are cached (required) |
-| `DOWNLOADS_DIR` | Where the assembled file is written (default `/downloads`) |
+While downloading, pieces are written into `<name>.tmp` and recorded in
+`<name>.journal`. Re-running the same torrent from the same directory resumes
+from the journal. Once every piece is written, `<name>.tmp` is renamed to
+`<name>` and the journal is deleted.
 
 ## Docker
 
-`docker-compose.yml` brings up the client alongside an `opentracker` instance and
-a few qBittorrent peers for testing:
+`docker-compose.yml` defines the client alongside an `opentracker` instance and
+five qBittorrent peers for testing. Put `.torrent` files in `docker/torrents`,
+then seed the peers' config and torrents with:
 
 ```sh
-docker compose up --build
+./setup_clients.sh 5
 ```
 
-Regenerate the compose file with a different number of qBittorrent peers via
-`python gen_compose.py <n>`.
+Start the tracker and peers, then run the client against one of the torrents:
+
+```sh
+docker compose up -d opentracker qbittorrent-1 qbittorrent-2 qbittorrent-3 qbittorrent-4 qbittorrent-5
+docker compose run --rm --build bittorrent-client --torrent /torrents/<file>.torrent
+```
+
+Downloads land in `docker/client/downloads`.

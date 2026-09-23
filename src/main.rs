@@ -13,7 +13,7 @@ use crate::download::download_torrent_from_path;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Name of the person to greet
+    /// Path to the .torrent file to download
     #[arg(short, long)]
     torrent: String,
 }
