@@ -54,6 +54,8 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
         })
         .collect();
 
+    println!("Found {} files in pieces directory", files.len());
+    println!("Loading existing pieces from pieces directory...");
     let loaded_pieces: Vec<(u32, Vec<u8>)> = files
         .par_iter()
         .filter_map(|entry| {
@@ -66,21 +68,14 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
 
             let piece_index = path.file_stem()?.to_str()?.parse::<u32>().ok()?;
 
-            let data = std::fs::read(&path).expect("Failed to read piece file");
-
+            // Check length
             let expected_length = torrent.get_piece_length(piece_index as usize);
-            if data.len() as u32 != expected_length {
+            if entry.metadata().ok()?.len() != expected_length as u64 {
                 println!("Warning: Piece {} incorrect length", piece_index);
                 return None;
             }
 
-            let expected_hash = torrent.info.pieces[piece_index as usize];
-            let actual_hash: [u8; 20] = Sha1::digest(&data).into();
-            if expected_hash != actual_hash {
-                println!("Warning: Piece {} incorrect hash", piece_index);
-                return None;
-            }
-
+            let data = std::fs::read(&path).expect("Failed to read piece file");
             Some((piece_index, data))
         })
         .collect();
