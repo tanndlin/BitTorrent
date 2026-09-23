@@ -1,6 +1,9 @@
 use super::super::bencoding::decode;
 use crate::{bencoding::decode::Value, connection::Peer, dht::dht_node::DhtNode};
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    net::{Ipv4Addr, SocketAddr},
+};
 
 #[derive(Debug)]
 pub enum KRPCResponse {
@@ -142,12 +145,14 @@ impl TryFrom<&HashMap<String, Value>> for KRPCResponseFindNode {
                         let node_info = &b[i..i + 26];
 
                         let node_id: [u8; 20] = node_info[0..20].try_into().unwrap();
-                        let ip = format!(
-                            "{}.{}.{}.{}",
-                            node_info[20], node_info[21], node_info[22], node_info[23]
+                        let ip = Ipv4Addr::new(
+                            node_info[20],
+                            node_info[21],
+                            node_info[22],
+                            node_info[23],
                         );
-                        let port = ((node_info[24] as u16) << 8) | (node_info[25] as u16);
-                        let location = format!("{}:{}", ip, port);
+                        let port = u16::from_be_bytes([node_info[24], node_info[25]]);
+                        let location = SocketAddr::from((ip, port));
 
                         DhtNode::new(Some(node_id), location)
                     })
@@ -233,12 +238,14 @@ impl TryFrom<&HashMap<String, Value>> for KRPCResponseGetPeers {
                             let node_info = &b[i..i + 26];
 
                             let node_id: [u8; 20] = node_info[0..20].try_into().unwrap();
-                            let ip = format!(
-                                "{}.{}.{}.{}",
-                                node_info[20], node_info[21], node_info[22], node_info[23]
+                            let ip = Ipv4Addr::new(
+                                node_info[20],
+                                node_info[21],
+                                node_info[22],
+                                node_info[23],
                             );
-                            let port = ((node_info[24] as u16) << 8) | (node_info[25] as u16);
-                            let location = format!("{}:{}", ip, port);
+                            let port = u16::from_be_bytes([node_info[24], node_info[25]]);
+                            let location = SocketAddr::from((ip, port));
 
                             DhtNode::new(Some(node_id), location)
                         })

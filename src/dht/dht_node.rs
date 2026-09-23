@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    net::UdpSocket,
+    net::{SocketAddr, ToSocketAddrs, UdpSocket},
     time::Duration,
 };
 
@@ -31,11 +31,16 @@ impl DhtClient {
         rand::rng().fill(&mut node_id);
 
         let nodes = trackers
-            .into_iter()
-            .map(|tracker| DhtNode {
-                node_id: None,
-                location: tracker,
+            .iter()
+            .filter_map(|tracker| match tracker.to_socket_addrs() {
+                Ok(addrs) => Some(addrs),
+                Err(err) => {
+                    println!("Failed to resolve DHT bootstrap node {}: {}", tracker, err);
+                    None
+                }
             })
+            .flatten()
+            .map(|addr| DhtNode::new(None, addr))
             .collect();
 
         DhtClient {
@@ -97,7 +102,7 @@ impl DhtClient {
 
             let candidates: Vec<_> = queue
                 .drain(..)
-                .filter(|n| visited.insert(n.location.clone()))
+                .filter(|n| visited.insert(n.location))
                 .take(8)
                 .collect();
 
@@ -134,9 +139,9 @@ impl DhtClient {
 
         let req = KRPCRequestGetPeers::new(self.node_id, *info_hash);
         let encoded: Vec<u8> = req.clone().into();
-        let addr = node.location.to_string();
+        let addr = node.location;
         self.socket
-            .send_to(&encoded, &addr)
+            .send_to(&encoded, addr)
             .map_err(|e| format!("Failed to send get_peers to {}: {}", addr, e))?;
 
         Ok(req)
@@ -147,13 +152,13 @@ impl DhtClient {
         let ping_request = KRPCRequestPing::new(self.node_id);
         let encoded: Vec<u8> = ping_request.into();
 
-        let addr = node.location.to_string();
+        let addr = node.location;
         self.socket
-            .send_to(&encoded, &addr)
+            .send_to(&encoded, addr)
             .map_err(|e| format!("Failed to send ping to {}: {}", addr, e))?;
 
         if let Some(res) = self.recv_response() {
-            println!("Received response from {}: {:?}", &addr, res);
+            println!("Received response from {}: {:?}", addr, res);
             match res {
                 KRPCResponse::Ping(_) => Ok(()),
                 _ => Err(format!(
@@ -186,11 +191,11 @@ impl DhtClient {
 #[derive(Debug, Clone)]
 pub struct DhtNode {
     node_id: Option<[u8; 20]>,
-    location: String,
+    location: SocketAddr,
 }
 
 impl DhtNode {
-    pub fn new(node_id: Option<[u8; 20]>, location: String) -> Self {
+    pub fn new(node_id: Option<[u8; 20]>, location: SocketAddr) -> Self {
         DhtNode { node_id, location }
     }
 }
