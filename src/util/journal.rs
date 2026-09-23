@@ -6,10 +6,11 @@ use std::{
 };
 
 pub struct Journal {
-    file: File,
+    // Handles are None once the download is finalized, so the files can be renamed/removed
+    file: Option<File>,
     piece_size: usize,
     pub pieces_written: HashMap<u32, bool>,
-    journal_file: File,
+    journal_file: Option<File>,
     journal_path: String,
     final_file_path: String,
     total_pieces: u32,
@@ -59,16 +60,23 @@ impl Journal {
             .collect();
 
         let total_pieces = total_pieces as u32;
-        Ok(Journal {
-            file,
+        let mut journal = Journal {
+            file: Some(file),
             piece_size,
             pieces_written,
-            journal_file,
+            journal_file: Some(journal_file),
             journal_path: journal_path.to_string(),
             final_file_path: file_path.to_string(),
             total_pieces,
             completed: false,
-        })
+        };
+
+        // A previous run may have written every piece without finalizing
+        if journal.num_written_pieces() == journal.total_pieces {
+            journal.finalize()?;
+        }
+
+        Ok(journal)
     }
 
     pub fn write_piece(&mut self, piece_index: u32, data: &[u8]) -> std::io::Result<()> {
@@ -79,24 +87,40 @@ impl Journal {
             ));
         }
 
+        let (Some(file), Some(journal_file)) = (&mut self.file, &mut self.journal_file) else {
+            // Already finalized, nothing left to write
+            return Ok(());
+        };
+
         let offset = piece_index as u64 * self.piece_size as u64;
-        self.file.seek(std::io::SeekFrom::Start(offset))?;
-        self.file.write_all(data)?;
+        file.seek(std::io::SeekFrom::Start(offset))?;
+        file.write_all(data)?;
         self.pieces_written.insert(piece_index, true);
 
         // Update the journal file
-        self.journal_file
-            .seek(std::io::SeekFrom::Start(piece_index as u64))?;
-        self.journal_file.write_all(&[1])?;
+        journal_file.seek(std::io::SeekFrom::Start(piece_index as u64))?;
+        journal_file.write_all(&[1])?;
 
         if self.num_written_pieces() == self.total_pieces {
-            let tmp_path = format!("{}.tmp", self.final_file_path);
-            fs::rename(tmp_path, &self.final_file_path).unwrap();
-            fs::remove_file(&self.journal_path)?;
-            self.completed = true;
-            println!("File saved successfully!");
+            self.finalize()?;
         }
 
+        Ok(())
+    }
+
+    /// Closes the file handles, moves the temp file to its final path and deletes the journal
+    fn finalize(&mut self) -> std::io::Result<()> {
+        if let Some(file) = self.file.take() {
+            file.sync_all()?;
+        }
+        // Windows refuses to rename or delete files with open handles, so close them first
+        self.journal_file = None;
+
+        let tmp_path = format!("{}.tmp", self.final_file_path);
+        fs::rename(tmp_path, &self.final_file_path)?;
+        fs::remove_file(&self.journal_path)?;
+        self.completed = true;
+        println!("File saved successfully!");
         Ok(())
     }
 
@@ -111,6 +135,9 @@ impl Drop for Journal {
         if self.completed {
             return;
         }
+        let Some(journal_file) = &mut self.journal_file else {
+            return;
+        };
 
         let mut buffer = vec![0u8; self.total_pieces as usize];
         for (&index, &written) in &self.pieces_written {
@@ -118,10 +145,10 @@ impl Drop for Journal {
                 *byte = written as u8;
             }
         }
-        self.journal_file
+        journal_file
             .seek(std::io::SeekFrom::Start(0))
             .expect("Failed to seek journal file");
-        self.journal_file
+        journal_file
             .write_all(&buffer)
             .expect("Failed to write journal file");
     }
