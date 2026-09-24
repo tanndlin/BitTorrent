@@ -72,13 +72,18 @@ pub struct PeerMessage {
     pub payload: Vec<u8>,
 }
 
-impl From<&PeerMessage> for Vec<u8> {
-    fn from(message: &PeerMessage) -> Self {
-        let mut buf = vec![];
-        buf.extend_from_slice(&(message.length).to_be_bytes());
-        buf.push(message.id as u8);
-        buf.extend_from_slice(&message.payload);
+impl PeerMessage {
+    pub fn encode_to(self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&(self.length).to_be_bytes());
+        buf.push(self.id as u8);
+        buf.extend(self.payload);
+    }
+}
 
+impl From<PeerMessage> for Vec<u8> {
+    fn from(message: PeerMessage) -> Self {
+        let mut buf = vec![];
+        message.encode_to(&mut buf);
         buf
     }
 }

@@ -65,8 +65,7 @@ pub fn connect_to_peer(
     let mut peer_message_stream = PeerMessageStream::new(stream);
     let mut peer_state = handle_handshake(torrent, &progress, &mut peer_message_stream, peer)?;
 
-    let interested_message = PeerMessage::create_interested();
-    let interested_bytes = Vec::from(&interested_message);
+    let interested_bytes = Vec::from(PeerMessage::create_interested());
     // println!("Sending interested message: {:?}", interested_bytes);
     peer_message_stream
         .write_all(&interested_bytes)
@@ -124,6 +123,7 @@ pub fn connect_to_peer(
             }
         }
 
+        let mut request_bytes = vec![];
         for piece_index in &peer_state.requested_pieces.clone() {
             if let PieceProgress::InProgress(piece_progress) = &mut *progress.read().unwrap().pieces
                 [*piece_index as usize]
@@ -146,12 +146,8 @@ pub fn connect_to_peer(
                         continue;
                     }
 
-                    let request_message =
-                        PeerMessage::create_request(*piece_index, start, block_progress.length);
-
-                    peer_message_stream
-                        .write_all(&Vec::from(&request_message))
-                        .map_err(|_| PeerProtocolError::ConnectionClosed)?;
+                    PeerMessage::create_request(*piece_index, start, block_progress.length)
+                        .encode_to(&mut request_bytes);
 
                     // Mark block as inflight
                     block_progress.inflight = true;
@@ -161,6 +157,10 @@ pub fn connect_to_peer(
                 }
             }
         }
+
+        peer_message_stream
+            .write_all(&request_bytes)
+            .map_err(|_| PeerProtocolError::ConnectionClosed)?;
     }
 
     // Close stream
@@ -220,7 +220,7 @@ fn handle_handshake(
         length: (1 + bitfield_payload.len()) as u32,
         payload: bitfield_payload,
     };
-    let bitfield_bytes = Vec::from(&bitfield_message);
+    let bitfield_bytes = Vec::from(bitfield_message);
     peer_message_stream
         .write_all(&bitfield_bytes)
         .map_err(|_| {
