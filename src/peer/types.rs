@@ -107,7 +107,7 @@ impl PeerMessage {
 
 pub struct TorrentProgress {
     pub journal: Mutex<Journal>,
-    pub pieces: HashMap<u32, Mutex<PieceProgress>>,
+    pub pieces: Vec<Mutex<PieceProgress>>,
     pub needed_pieces: HashSet<u32>,
     pub connected_peers: HashSet<Peer>,
 }
@@ -122,31 +122,28 @@ impl From<&Torrent> for TorrentProgress {
         .unwrap();
 
         let mut needed_pieces = HashSet::new();
-        let pieces: HashMap<_, _> =
-            (0u32..torrent.total_length().div_ceil(torrent.info.piece_length) as u32)
-                .map(|piece_index| {
-                    let written = journal
-                        .pieces_written
-                        .get(&(piece_index))
-                        .copied()
-                        .unwrap_or(false);
-                    if written {
-                        return (piece_index, Mutex::new(PieceProgress::Completed));
-                    }
+        let pieces: Vec<_> = (0u32..torrent.total_length().div_ceil(torrent.info.piece_length)
+            as u32)
+            .map(|piece_index| {
+                let written = journal
+                    .pieces_written
+                    .get(&(piece_index))
+                    .copied()
+                    .unwrap_or(false);
+                if written {
+                    return Mutex::new(PieceProgress::Completed);
+                }
 
-                    needed_pieces.insert(piece_index);
-                    let piece_length = torrent.get_piece_length(piece_index as usize);
+                needed_pieces.insert(piece_index);
+                let piece_length = torrent.get_piece_length(piece_index as usize);
 
-                    (
-                        piece_index,
-                        Mutex::new(PieceProgress::InProgress(PieceProgressData::new(
-                            piece_index,
-                            piece_length,
-                            torrent.info.pieces[piece_index as usize],
-                        ))),
-                    )
-                })
-                .collect();
+                Mutex::new(PieceProgress::InProgress(PieceProgressData::new(
+                    piece_index,
+                    piece_length,
+                    torrent.info.pieces[piece_index as usize],
+                )))
+            })
+            .collect();
 
         TorrentProgress {
             journal: Mutex::new(journal),

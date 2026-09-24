@@ -125,8 +125,10 @@ pub fn connect_to_peer(
         }
 
         for piece_index in &peer_state.requested_pieces.clone() {
-            if let PieceProgress::InProgress(piece_progress) =
-                &mut *progress.read().unwrap().pieces[piece_index].lock().unwrap()
+            if let PieceProgress::InProgress(piece_progress) = &mut *progress.read().unwrap().pieces
+                [*piece_index as usize]
+                .lock()
+                .unwrap()
             {
                 let mut start = 0;
                 while start < torrent.get_piece_length(*piece_index as usize)
@@ -203,12 +205,12 @@ fn handle_handshake(
     let mut bitfield_payload = vec![0; num_bitfield_bytes];
     {
         let progress = progress.read().unwrap();
-        for i in 0u32..torrent.info.pieces.len() as u32 {
+        for i in 0..torrent.info.pieces.len() {
             let byte_index = i / 8;
             let bit_index = 7 - (i % 8);
-            if let PieceProgress::Completed = &mut *progress.pieces.get(&i).unwrap().lock().unwrap()
+            if let PieceProgress::Completed = &mut *progress.pieces.get(i).unwrap().lock().unwrap()
             {
-                bitfield_payload[byte_index as usize] |= 1 << bit_index;
+                bitfield_payload[byte_index] |= 1 << bit_index;
             }
         }
     }
@@ -294,7 +296,7 @@ fn handle_message(
             peer_state.inflight = peer_state.inflight.saturating_sub(1);
 
             let progress_read = progress.read().unwrap();
-            let mut piece = progress_read.pieces[&index].lock().unwrap();
+            let mut piece = progress_read.pieces[index as usize].lock().unwrap();
             let final_data = if let PieceProgress::InProgress(piece_progress) = &mut *piece {
                 piece_progress.add_data(begin, block);
 
