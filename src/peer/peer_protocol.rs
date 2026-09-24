@@ -199,13 +199,18 @@ fn handle_handshake(
     let num_bitfield_bytes = torrent.info.pieces.len().div_ceil(8);
     let peer_state = PeerState::new(peer, num_bitfield_bytes);
     let mut bitfield_payload = vec![0; num_bitfield_bytes];
-    for i in 0u32..torrent.info.pieces.len() as u32 {
-        let byte_index = i / 8;
-        let bit_index = 7 - (i % 8);
-        if let PieceProgress::Completed = progress.read().unwrap().pieces.get(&i).unwrap() {
-            bitfield_payload[byte_index as usize] |= 1 << bit_index;
+    {
+        let progress = progress.read().unwrap();
+        for i in 0u32..torrent.info.pieces.len() as u32 {
+            let byte_index = i / 8;
+            let bit_index = 7 - (i % 8);
+            if let PieceProgress::Completed = &mut *progress.pieces.get(&i).unwrap().lock().unwrap()
+            {
+                bitfield_payload[byte_index as usize] |= 1 << bit_index;
+            }
         }
     }
+
     let bitfield_message = PeerMessage {
         id: PeerMessageID::Bitfield,
         length: (1 + bitfield_payload.len()) as u32,
