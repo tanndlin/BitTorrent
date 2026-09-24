@@ -19,6 +19,9 @@ RUN cargo build --release --bin bittorrent
 FROM rust:latest AS profiling-builder
 WORKDIR /app
 
+# Keep a frame pointer in every function so stacks unwind reliably even where DWARF unwind info is thin
+ENV RUSTFLAGS="-C force-frame-pointers=yes"
+
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir -p src && echo "fn main() {}" > src/main.rs
 RUN cargo build --profile profiling --bin bittorrent
@@ -31,7 +34,8 @@ RUN cargo build --profile profiling --bin bittorrent
 FROM debian:trixie-slim AS profiling
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y ca-certificates libssl3 curl xz-utils && rm -rf /var/lib/apt/lists/*
+# libc6-dbg: debian's libc is stripped, so without it libc frames show up as fun_XXXXXX instead of memcpy etc.
+RUN apt-get update && apt-get install -y ca-certificates libssl3 curl xz-utils libc6-dbg && rm -rf /var/lib/apt/lists/*
 RUN curl -sSL https://github.com/mstange/samply/releases/download/samply-v0.13.1/samply-x86_64-unknown-linux-gnu.tar.xz \
     | tar -xJ --strip-components=1 -C /usr/local/bin samply-x86_64-unknown-linux-gnu/samply
 
