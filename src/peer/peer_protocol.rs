@@ -1,4 +1,4 @@
-use rand::seq::IteratorRandom;
+use rand::seq::{IndexedRandom, IteratorRandom};
 
 use crate::{
     bencoding::torrent::Torrent,
@@ -49,7 +49,7 @@ pub fn connect_to_peer(
     peer: &Peer,
     torrent: &Torrent,
     progress: Arc<RwLock<TorrentProgress>>,
-    completed_pieces: Arc<AtomicU64>,
+    num_completed_pieces: Arc<AtomicU64>,
 ) -> Result<(), PeerProtocolError> {
     let stream = TcpStream::connect_timeout(&SocketAddr::new(peer.ip, peer.port), IO_TIMEOUT)
         .map_err(|_| PeerProtocolError::FailedToConnect)?;
@@ -74,13 +74,15 @@ pub fn connect_to_peer(
         .write_all(&interested_bytes)
         .map_err(|_| PeerProtocolError::ConnectionClosed)?;
 
-    while completed_pieces.load(SeqCst) < torrent.info.pieces.len() as u64 {
+    let mut rand = rand::rng();
+
+    while num_completed_pieces.load(SeqCst) < torrent.info.pieces.len() as u64 {
         let got_message = if let Some(message) = peer_message_stream.try_read_message()? {
             handle_message(
                 &message,
                 &mut peer_state,
                 progress.clone(),
-                completed_pieces.clone(),
+                num_completed_pieces.clone(),
             );
             true
         } else {
@@ -102,23 +104,18 @@ pub fn connect_to_peer(
         }
 
         // Choose 5 random pieces that the peer has and that we don't have
-        let completed_pieces: HashSet<u32> = {
-            let prog = progress.read().unwrap();
-            prog.journal
-                .pieces_written
-                .iter()
-                .filter(|(_, v)| **v)
-                .map(|(k, _)| *k)
-                .collect()
-        };
+        let needed_pieces: Vec<u32> = progress
+            .read()
+            .unwrap()
+            .needed_pieces
+            .iter()
+            .copied()
+            .filter(|&piece_index| bitfield_contains_piece(&peer_state.bitfield, piece_index))
+            .collect();
 
-        let needed_pieces = (0u32..torrent.info.pieces.len() as u32)
-            .filter(|&i| bitfield_contains_piece(&peer_state.bitfield, i))
-            .filter(|&i| !completed_pieces.contains(&i));
-
-        while peer_state.requested_pieces.len() < 2 {
-            if let Some(piece_index) = needed_pieces.clone().choose(&mut rand::rng()) {
-                peer_state.requested_pieces.push(piece_index);
+        while peer_state.requested_pieces.len() < 5 {
+            if let Some(piece_index) = needed_pieces.choose(&mut rand) {
+                peer_state.requested_pieces.push(*piece_index);
             } else {
                 break;
             }
@@ -140,7 +137,7 @@ pub fn connect_to_peer(
                     //     16 * 1024
                     // );
                     let block_progress = piece_progress.data.get_mut(&start).unwrap();
-                    if block_progress.inflight || block_progress.data.is_some() {
+                    if block_progress.inflight || block_progress.complete {
                         start += 16 * 1024;
                         continue;
                     }
@@ -293,19 +290,14 @@ fn handle_message(
             let final_data = if let Some(PieceProgress::InProgress(piece_progress)) =
                 progress.pieces.get_mut(&index)
             {
-                piece_progress.data.insert(
-                    begin,
-                    BlockProgress {
-                        length: block.len() as u32,
-                        inflight: false,
-                        data: Some(block.to_vec()),
-                    },
-                );
+                piece_progress.add_data(begin, block);
 
                 match piece_progress.get_final_data() {
                     Ok(Some(data)) => {
                         // Remove the piece from requested pieces
                         peer_state.requested_pieces.retain(|&i| i != index);
+                        progress.pieces.insert(index, PieceProgress::Completed);
+                        progress.needed_pieces.remove(&index);
                         Some(data)
                     }
                     Ok(None) => None,

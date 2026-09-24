@@ -105,6 +105,7 @@ impl PeerMessage {
 pub struct TorrentProgress {
     pub journal: Journal,
     pub pieces: HashMap<u32, PieceProgress>,
+    pub needed_pieces: HashSet<u32>,
     pub connected_peers: HashSet<Peer>,
 }
 
@@ -117,6 +118,7 @@ impl From<&Torrent> for TorrentProgress {
         )
         .unwrap();
 
+        let mut needed_pieces = HashSet::new();
         let pieces: HashMap<_, _> =
             (0u32..torrent.total_length().div_ceil(torrent.info.piece_length) as u32)
                 .map(|piece_index| {
@@ -129,32 +131,16 @@ impl From<&Torrent> for TorrentProgress {
                         return (piece_index, PieceProgress::Completed);
                     }
 
-                    let i = piece_index as usize;
-                    let piece_length = torrent.get_piece_length(i);
-                    let block_size = 16 * 1024; // 16 KB blocks
-                    let mut data = HashMap::new();
-                    let mut offset = 0;
-                    while offset < piece_length {
-                        let block_length = std::cmp::min(block_size, piece_length - offset);
-                        data.insert(
-                            offset,
-                            BlockProgress {
-                                length: block_length,
-                                inflight: false,
-                                data: None,
-                            },
-                        );
-                        offset += block_length;
-                    }
+                    needed_pieces.insert(piece_index);
+                    let piece_length = torrent.get_piece_length(piece_index as usize);
 
                     (
                         piece_index,
-                        PieceProgress::InProgress(PieceProgressData {
-                            index: piece_index,
-                            length: piece_length,
-                            data,
-                            expected_hash: torrent.info.pieces[i],
-                        }),
+                        PieceProgress::InProgress(PieceProgressData::new(
+                            piece_index,
+                            piece_length,
+                            torrent.info.pieces[piece_index as usize],
+                        )),
                     )
                 })
                 .collect();
@@ -162,6 +148,7 @@ impl From<&Torrent> for TorrentProgress {
         TorrentProgress {
             journal,
             pieces,
+            needed_pieces,
             connected_peers: HashSet::new(),
         }
     }
@@ -173,34 +160,56 @@ pub enum PieceProgress {
 }
 
 pub struct PieceProgressData {
-    pub index: u32,
-    pub length: u32,
+    index: u32,
+    length: u32,
+    total_blocks: u32,
+    completed_blocks: u32,
+    buffer: Vec<u8>, // length bytes, allocated on first block to save upfront memory cost
     pub data: HashMap<u32, BlockProgress>,
-    pub expected_hash: [u8; 20],
+    expected_hash: [u8; 20],
 }
 
 impl PieceProgressData {
-    pub fn get_final_data(&self) -> Result<Option<Vec<u8>>, String> {
-        let mut final_data = vec![0; self.length as usize];
+    pub fn new(index: u32, length: u32, expected_hash: [u8; 20]) -> Self {
+        let block_size = 16 * 1024; // 16 KB blocks
+        let mut data = HashMap::new();
+        let mut offset = 0;
+        while offset < length {
+            let block_length = std::cmp::min(block_size, length - offset);
+            data.insert(
+                offset,
+                BlockProgress {
+                    length: block_length,
+                    inflight: false,
+                    complete: false,
+                },
+            );
+            offset += block_length;
+        }
 
-        let keys_sorted: Vec<u32> = self.data.keys().cloned().collect();
-        for begin in keys_sorted {
-            let block_progress = self.data.get(&begin).unwrap();
-            if block_progress.data.is_none() {
-                return Ok(None);
-            }
+        Self {
+            index,
+            length,
+            total_blocks: data.len() as u32,
+            completed_blocks: 0,
+            // Allocated on the first block, so pieces that haven't started cost nothing
+            buffer: Vec::new(),
+            data,
+            expected_hash,
+        }
+    }
 
-            let block_data = block_progress.data.as_ref().unwrap();
-            final_data[begin as usize..(begin + block_progress.length) as usize]
-                .copy_from_slice(block_data);
+    pub fn get_final_data(&mut self) -> Result<Option<Vec<u8>>, String> {
+        if self.completed_blocks < self.total_blocks {
+            return Ok(None);
         }
 
         // Chech hash
         let mut hasher = Sha1::new();
-        hasher.update(&final_data);
+        hasher.update(&self.buffer);
         let piece_hash: [u8; 20] = hasher.finalize().into();
         if piece_hash == self.expected_hash {
-            return Ok(Some(final_data));
+            return Ok(Some(std::mem::take(&mut self.buffer)));
         }
 
         Err(format!(
@@ -210,17 +219,39 @@ impl PieceProgressData {
     }
 
     pub fn reset(&mut self) {
+        self.completed_blocks = 0;
         self.data.iter_mut().for_each(|(_, block)| {
             block.inflight = false;
-            block.data = None;
+            block.complete = false;
         });
+    }
+
+    pub fn add_data(&mut self, begin: u32, block: &[u8]) -> bool {
+        let Some(slot) = self.data.get_mut(&begin) else {
+            return false;
+        };
+        if slot.length != block.len() as u32 {
+            return false;
+        }
+
+        if !slot.complete {
+            slot.complete = true;
+            self.completed_blocks += 1;
+        }
+        slot.inflight = false;
+
+        if self.buffer.is_empty() {
+            self.buffer = vec![0; self.length as usize];
+        }
+        self.buffer[begin as usize..begin as usize + block.len()].copy_from_slice(block);
+        true
     }
 }
 
 pub struct BlockProgress {
     pub length: u32,
     pub inflight: bool,
-    pub data: Option<Vec<u8>>,
+    pub complete: bool,
 }
 
 pub struct PeerState {
