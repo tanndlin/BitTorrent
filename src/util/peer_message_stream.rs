@@ -12,11 +12,7 @@ pub struct PeerMessageStream {
 impl PeerMessageStream {
     pub fn new(stream: TcpStream) -> Self {
         Self {
-            stream: GreedyTcpStream {
-                stream,
-                bytes_left: Vec::new(),
-                parser: parse_next_peer_message,
-            },
+            stream: GreedyTcpStream::new(stream, parse_next_peer_message),
         }
     }
 
