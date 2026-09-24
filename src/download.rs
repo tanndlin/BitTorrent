@@ -35,7 +35,7 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
     let progress: Arc<RwLock<TorrentProgress>> = Arc::new(RwLock::new((&torrent).into()));
     let total_pieces = torrent.info.pieces.len() as u64;
 
-    let loaded_pieces = progress.read().unwrap().journal.num_written_pieces();
+    let loaded_pieces = progress.read().unwrap().journal.lock().unwrap().num_written_pieces();
     println!("{loaded_pieces} pieces already downloaded");
     completed_pieces.fetch_add(loaded_pieces as u64, SeqCst);
 

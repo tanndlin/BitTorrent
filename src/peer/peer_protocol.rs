@@ -1,16 +1,14 @@
-use rand::seq::{IndexedRandom, IteratorRandom};
+use rand::seq::IndexedRandom;
 
 use crate::{
     bencoding::torrent::Torrent,
     connection::Peer,
     peer::types::{
-        BlockProgress, PeerHandshake, PeerMessage, PeerMessageID, PeerState, PieceProgress,
-        TorrentProgress,
+        PeerHandshake, PeerMessage, PeerMessageID, PeerState, PieceProgress, TorrentProgress,
     },
     util::peer_message_stream::PeerMessageStream,
 };
 use std::{
-    collections::HashSet,
     fmt::Display,
     io::Read,
     net::{SocketAddr, TcpStream},
@@ -122,9 +120,8 @@ pub fn connect_to_peer(
         }
 
         for piece_index in &peer_state.requested_pieces.clone() {
-            let mut torrent_progress = progress.write().unwrap();
             if let PieceProgress::InProgress(piece_progress) =
-                torrent_progress.pieces.get_mut(piece_index).unwrap()
+                &mut *progress.read().unwrap().pieces[piece_index].lock().unwrap()
             {
                 let mut start = 0;
                 while start < torrent.get_piece_length(*piece_index as usize)
@@ -291,18 +288,16 @@ fn handle_message(
             // );
             peer_state.inflight = peer_state.inflight.saturating_sub(1);
 
-            let mut progress = progress.write().unwrap();
-            let final_data = if let Some(PieceProgress::InProgress(piece_progress)) =
-                progress.pieces.get_mut(&index)
-            {
+            let progress_read = progress.read().unwrap();
+            let mut piece = progress_read.pieces[&index].lock().unwrap();
+            let final_data = if let PieceProgress::InProgress(piece_progress) = &mut *piece {
                 piece_progress.add_data(begin, block);
 
                 match piece_progress.get_final_data() {
                     Ok(Some(data)) => {
                         // Remove the piece from requested pieces
                         peer_state.requested_pieces.retain(|&i| i != index);
-                        progress.pieces.insert(index, PieceProgress::Completed);
-                        progress.needed_pieces.remove(&index);
+                        *piece = PieceProgress::Completed;
                         Some(data)
                     }
                     Ok(None) => None,
@@ -323,9 +318,21 @@ fn handle_message(
                 None
             };
 
+            drop(piece);
+            drop(progress_read);
+
             if let Some(data) = final_data {
                 // println!("Completed piece index: {}, writing to file", index);
-                progress.journal.write_piece(index, &data).unwrap();
+                progress.write().unwrap().needed_pieces.remove(&index);
+
+                progress
+                    .read()
+                    .unwrap()
+                    .journal
+                    .lock()
+                    .unwrap()
+                    .write_piece(index, &data)
+                    .unwrap();
                 completed_pieces.fetch_add(1, SeqCst);
             }
         }

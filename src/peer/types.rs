@@ -1,5 +1,8 @@
 use sha1::{Digest, Sha1};
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Mutex,
+};
 
 use crate::{bencoding::torrent::Torrent, connection::Peer, util::Journal};
 
@@ -103,8 +106,8 @@ impl PeerMessage {
 }
 
 pub struct TorrentProgress {
-    pub journal: Journal,
-    pub pieces: HashMap<u32, PieceProgress>,
+    pub journal: Mutex<Journal>,
+    pub pieces: HashMap<u32, Mutex<PieceProgress>>,
     pub needed_pieces: HashSet<u32>,
     pub connected_peers: HashSet<Peer>,
 }
@@ -128,7 +131,7 @@ impl From<&Torrent> for TorrentProgress {
                         .copied()
                         .unwrap_or(false);
                     if written {
-                        return (piece_index, PieceProgress::Completed);
+                        return (piece_index, Mutex::new(PieceProgress::Completed));
                     }
 
                     needed_pieces.insert(piece_index);
@@ -136,17 +139,17 @@ impl From<&Torrent> for TorrentProgress {
 
                     (
                         piece_index,
-                        PieceProgress::InProgress(PieceProgressData::new(
+                        Mutex::new(PieceProgress::InProgress(PieceProgressData::new(
                             piece_index,
                             piece_length,
                             torrent.info.pieces[piece_index as usize],
-                        )),
+                        ))),
                     )
                 })
                 .collect();
 
         TorrentProgress {
-            journal,
+            journal: Mutex::new(journal),
             pieces,
             needed_pieces,
             connected_peers: HashSet::new(),
