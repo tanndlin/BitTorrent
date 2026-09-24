@@ -1,19 +1,19 @@
-use std::{io::Read, net::TcpStream};
+use std::{collections::VecDeque, io::Read, net::TcpStream};
 
 use crate::peer::PeerProtocolError;
 
 pub struct GreedyTcpStream<T> {
     pub stream: TcpStream,
-    bytes_left: Vec<u8>,
-    parser: fn(&[u8]) -> Option<(T, usize)>,
+    bytes_left: VecDeque<u8>,
+    parser: fn(&mut VecDeque<u8>) -> Option<T>,
     buf: Box<[u8; 32768]>,
 }
 
 impl<T> GreedyTcpStream<T> {
-    pub fn new(stream: TcpStream, parser: fn(&[u8]) -> Option<(T, usize)>) -> Self {
+    pub fn new(stream: TcpStream, parser: fn(&mut VecDeque<u8>) -> Option<T>) -> Self {
         Self {
             stream,
-            bytes_left: vec![],
+            bytes_left: VecDeque::new(),
             parser,
             buf: Box::new([0u8; 32768]),
         }
@@ -21,8 +21,7 @@ impl<T> GreedyTcpStream<T> {
 
     pub fn try_read_message(&mut self) -> Result<Option<T>, PeerProtocolError> {
         // First check already-buffered bytes
-        if let Some((message, bytes_used)) = (self.parser)(&self.bytes_left) {
-            self.bytes_left.drain(0..bytes_used);
+        if let Some(message) = (self.parser)(&mut self.bytes_left) {
             return Ok(Some(message));
         }
 
@@ -34,9 +33,8 @@ impl<T> GreedyTcpStream<T> {
         match self.stream.read(&mut *self.buf) {
             Ok(0) => Err(PeerProtocolError::ConnectionClosed),
             Ok(n) => {
-                self.bytes_left.extend_from_slice(&self.buf[..n]);
-                if let Some((message, bytes_used)) = (self.parser)(&self.bytes_left) {
-                    self.bytes_left.drain(0..bytes_used);
+                self.bytes_left.extend(&self.buf[..n]);
+                if let Some(message) = (self.parser)(&mut self.bytes_left) {
                     return Ok(Some(message));
                 }
                 Ok(None)

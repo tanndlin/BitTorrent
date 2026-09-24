@@ -1,4 +1,4 @@
-use std::{io::Write, net::TcpStream};
+use std::{collections::VecDeque, io::Write, net::TcpStream};
 
 use crate::{
     peer::{PeerMessage, PeerMessageID, PeerProtocolError},
@@ -25,26 +25,24 @@ impl PeerMessageStream {
     }
 }
 
-fn parse_next_peer_message(buf: &[u8]) -> Option<(PeerMessage, usize)> {
+fn parse_next_peer_message(buf: &mut VecDeque<u8>) -> Option<PeerMessage> {
     if buf.len() < 4 {
         return None;
     }
 
-    let length = u32::from_be_bytes(buf[0..4].try_into().unwrap()) as usize;
+    let length = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
     if buf.len() < 4 + length {
         return None;
     }
 
     if length == 0 {
         // Keep-alive message
-        return Some((
-            PeerMessage {
-                id: PeerMessageID::KeepAlive,
-                length: 0,
-                payload: vec![],
-            },
-            4,
-        ));
+        buf.drain(..4);
+        return Some(PeerMessage {
+            id: PeerMessageID::KeepAlive,
+            length: 0,
+            payload: vec![],
+        });
     }
 
     let id = match buf[4] {
@@ -64,13 +62,11 @@ fn parse_next_peer_message(buf: &[u8]) -> Option<(PeerMessage, usize)> {
             return None;
         }
     };
-    let payload = buf[5..4 + length].to_vec();
-    Some((
-        PeerMessage {
-            id,
-            length: (length - 1) as u32,
-            payload,
-        },
-        4 + length,
-    ))
+    let payload = buf.make_contiguous()[5..4 + length].to_vec();
+    buf.drain(..4 + length);
+    Some(PeerMessage {
+        id,
+        length: (length - 1) as u32,
+        payload,
+    })
 }
