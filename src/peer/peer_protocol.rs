@@ -1,4 +1,4 @@
-use rand::seq::IndexedRandom;
+use rand::seq::IteratorRandom;
 
 use crate::{
     bencoding::torrent::Torrent,
@@ -102,25 +102,25 @@ pub fn connect_to_peer(
         }
 
         // Choose 5 random pieces that the peer has and that we don't have
-        let needed_pieces: Vec<u32> = {
+        {
             let progress = progress.read().unwrap();
             // Remove the piece from requested pieces if another peer already completed it
             peer_state
                 .requested_pieces
                 .retain(|piece_index| progress.needed_pieces.contains(piece_index));
-            progress
-                .needed_pieces
-                .iter()
-                .copied()
-                .filter(|&piece_index| bitfield_contains_piece(&peer_state.bitfield, piece_index))
-                .collect()
-        };
 
-        while peer_state.requested_pieces.len() < 5 {
-            if let Some(piece_index) = needed_pieces.choose(&mut rand) {
-                peer_state.requested_pieces.push(*piece_index);
-            } else {
-                break;
+            let missing = 5usize.saturating_sub(peer_state.requested_pieces.len());
+            if missing > 0 {
+                let new_pieces = progress
+                    .needed_pieces
+                    .iter()
+                    .copied()
+                    .filter(|&piece_index| {
+                        bitfield_contains_piece(&peer_state.bitfield, piece_index)
+                            && !peer_state.requested_pieces.contains(&piece_index)
+                    })
+                    .choose_multiple(&mut rand, missing);
+                peer_state.requested_pieces.extend(new_pieces);
             }
         }
 
