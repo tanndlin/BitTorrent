@@ -19,16 +19,12 @@ impl<T> GreedyTcpStream<T> {
         }
     }
 
+    // Tries a non-blocking read
     pub fn try_read_message(&mut self) -> Result<Option<T>, PeerProtocolError> {
         // First check already-buffered bytes
         if let Some(message) = (self.parser)(&mut self.bytes_left) {
             return Ok(Some(message));
         }
-
-        // Try a non-blocking read
-        self.stream
-            .set_read_timeout(Some(std::time::Duration::from_millis(1)))
-            .unwrap();
 
         match self.stream.read(&mut *self.buf) {
             Ok(0) => Err(PeerProtocolError::ConnectionClosed),

@@ -67,6 +67,12 @@ pub fn connect_to_peer(
     let mut peer_message_stream = PeerMessageStream::new(stream);
     let mut peer_state = handle_handshake(torrent, &progress, &mut peer_message_stream, peer)?;
 
+    // The handshake needs the long timeout; after that, reads should return
+    // quickly so the loop can keep sending requests
+    peer_message_stream
+        .set_read_timeout(Duration::from_millis(1))
+        .map_err(|_| PeerProtocolError::ConnectionClosed)?;
+
     let interested_bytes = Vec::from(PeerMessage::create_interested());
     // println!("Sending interested message: {:?}", interested_bytes);
     peer_message_stream
