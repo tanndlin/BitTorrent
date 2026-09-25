@@ -76,7 +76,7 @@ pub fn connect_to_peer(
     let mut rand = rand::rng();
 
     while num_completed_pieces.load(SeqCst) < torrent.info.pieces.len() as u64 {
-        let got_message = if let Some(message) = peer_message_stream.try_read_message()? {
+        if let Some(message) = peer_message_stream.try_read_message()? {
             handle_message(
                 &message,
                 &mut peer_state,
@@ -84,14 +84,7 @@ pub fn connect_to_peer(
                 num_completed_pieces.clone(),
                 &mut tx,
             );
-            true
-        } else {
-            false
         };
-
-        if !got_message {
-            std::thread::sleep(Duration::from_millis(10));
-        }
 
         if !peer_state.is_choked && peer_state.bitfield.is_empty() {
             std::thread::sleep(Duration::from_millis(10));

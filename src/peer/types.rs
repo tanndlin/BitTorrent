@@ -157,20 +157,23 @@ impl TorrentProgress {
             .collect();
 
         let rx_journal = journal.clone();
-        let writer_thread = Some(thread::spawn(move || {
-            while let Ok(Some((piece_index, buf))) = rx.recv() {
-                if let Err(e) = rx_journal.lock().unwrap().write_piece(piece_index, &buf) {
-                    println!("Error writing to journal: {e}");
+        let writer_thread = thread::Builder::new()
+            .name("journal-writer".into())
+            .spawn(move || {
+                while let Ok(Some((piece_index, buf))) = rx.recv() {
+                    if let Err(e) = rx_journal.lock().unwrap().write_piece(piece_index, &buf) {
+                        println!("Error writing to journal: {e}");
+                    }
                 }
-            }
-        }));
+            })
+            .expect("Failed to spawn journal-writer thread");
 
         TorrentProgress {
             journal,
             pieces,
             needed_pieces,
             connected_peers: HashSet::new(),
-            writer_thread,
+            writer_thread: Some(writer_thread),
         }
     }
 }
