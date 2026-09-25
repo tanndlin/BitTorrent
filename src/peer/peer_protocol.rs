@@ -86,13 +86,7 @@ pub fn connect_to_peer(
             );
         };
 
-        if !peer_state.is_choked && peer_state.bitfield.is_empty() {
-            std::thread::sleep(Duration::from_millis(10));
-            continue;
-        }
-
         if peer_state.bitfield.is_empty() || peer_state.is_choked {
-            std::thread::sleep(Duration::from_millis(10));
             continue;
         }
 
