@@ -3,7 +3,7 @@ use std::{
     io::Write,
     sync::{
         atomic::{AtomicU64, Ordering::SeqCst},
-        Arc, RwLock,
+        mpsc, Arc, RwLock,
     },
     thread,
     time::{Duration, Instant},
@@ -32,16 +32,13 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
     dbg!(&torrent.trackers);
 
     let start_time = std::time::Instant::now();
-    let progress: Arc<RwLock<TorrentProgress>> = Arc::new(RwLock::new((&torrent).into()));
+
+    let (tx, rx) = mpsc::channel();
+    let progress: Arc<RwLock<TorrentProgress>> =
+        Arc::new(RwLock::new(TorrentProgress::new(&torrent, rx)));
     let total_pieces = torrent.info.pieces.len() as u64;
 
-    let loaded_pieces = progress
-        .read()
-        .unwrap()
-        .journal
-        .lock()
-        .unwrap()
-        .num_written_pieces();
+    let loaded_pieces = progress.read().unwrap().num_written_pieces();
     println!("{loaded_pieces} pieces already downloaded");
     completed_pieces.fetch_add(loaded_pieces as u64, SeqCst);
 
@@ -112,12 +109,14 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
                     let progress = Arc::clone(&progress);
                     let torrent = Arc::clone(&torrent);
                     let completed_pieces = Arc::clone(&completed_pieces);
+                    let tx = tx.clone();
                     thread::spawn(move || {
                         match connect_to_peer(
                             &peer,
                             &torrent,
                             progress.clone(),
                             completed_pieces.clone(),
+                            tx,
                         ) {
                             Ok(_) => {}
                             Err(err) => match err {
@@ -144,6 +143,12 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
         "Download complete! Time taken: {:.2?}",
         end_time.duration_since(start_time)
     );
+
+    tx.send(None).unwrap();
+    let writer_thread = progress.write().unwrap().writer_thread.take();
+    if let Some(handle) = writer_thread {
+        handle.join().unwrap();
+    }
 }
 
 fn get_peers_from_torrent(

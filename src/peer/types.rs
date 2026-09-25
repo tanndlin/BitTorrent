@@ -1,7 +1,8 @@
 use sha1::{Digest, Sha1};
 use std::{
     collections::{HashMap, HashSet},
-    sync::Mutex,
+    sync::{mpsc::Receiver, Arc, Mutex},
+    thread::{self, JoinHandle},
 };
 
 use crate::{bencoding::torrent::Torrent, connection::Peer, util::Journal};
@@ -111,26 +112,31 @@ impl PeerMessage {
 }
 
 pub struct TorrentProgress {
-    pub journal: Mutex<Journal>,
+    journal: Arc<Mutex<Journal>>,
     pub pieces: Vec<Mutex<PieceProgress>>,
     pub needed_pieces: HashSet<u32>,
     pub connected_peers: HashSet<Peer>,
+    pub writer_thread: Option<JoinHandle<()>>,
 }
 
-impl From<&Torrent> for TorrentProgress {
-    fn from(torrent: &Torrent) -> Self {
-        let journal = Journal::new(
-            &torrent.info.name,
-            torrent.total_length() as usize,
-            torrent.info.piece_length as usize,
-        )
-        .unwrap();
+impl TorrentProgress {
+    pub fn new(torrent: &Torrent, rx: Receiver<Option<(u32, Vec<u8>)>>) -> Self {
+        let journal = Arc::new(Mutex::new(
+            Journal::new(
+                &torrent.info.name,
+                torrent.total_length() as usize,
+                torrent.info.piece_length as usize,
+            )
+            .unwrap(),
+        ));
 
         let mut needed_pieces = HashSet::new();
         let pieces: Vec<_> = (0u32..torrent.total_length().div_ceil(torrent.info.piece_length)
             as u32)
             .map(|piece_index| {
                 let written = journal
+                    .lock()
+                    .unwrap()
                     .pieces_written
                     .get(&(piece_index))
                     .copied()
@@ -150,12 +156,28 @@ impl From<&Torrent> for TorrentProgress {
             })
             .collect();
 
+        let rx_journal = journal.clone();
+        let writer_thread = Some(thread::spawn(move || {
+            while let Ok(Some((piece_index, buf))) = rx.recv() {
+                if let Err(e) = rx_journal.lock().unwrap().write_piece(piece_index, &buf) {
+                    println!("Error writing to journal: {e}");
+                }
+            }
+        }));
+
         TorrentProgress {
-            journal: Mutex::new(journal),
+            journal,
             pieces,
             needed_pieces,
             connected_peers: HashSet::new(),
+            writer_thread,
         }
+    }
+}
+
+impl TorrentProgress {
+    pub fn num_written_pieces(&self) -> u32 {
+        self.journal.lock().unwrap().num_written_pieces()
     }
 }
 

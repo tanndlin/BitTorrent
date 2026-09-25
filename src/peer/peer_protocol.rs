@@ -14,6 +14,7 @@ use std::{
     net::{SocketAddr, TcpStream},
     sync::{
         atomic::{AtomicU64, Ordering::SeqCst},
+        mpsc::Sender,
         Arc, RwLock,
     },
     time::Duration,
@@ -48,6 +49,7 @@ pub fn connect_to_peer(
     torrent: &Torrent,
     progress: Arc<RwLock<TorrentProgress>>,
     num_completed_pieces: Arc<AtomicU64>,
+    mut tx: Sender<Option<(u32, Vec<u8>)>>,
 ) -> Result<(), PeerProtocolError> {
     let stream = TcpStream::connect_timeout(&SocketAddr::new(peer.ip, peer.port), IO_TIMEOUT)
         .map_err(|_| PeerProtocolError::FailedToConnect)?;
@@ -80,6 +82,7 @@ pub fn connect_to_peer(
                 &mut peer_state,
                 progress.clone(),
                 num_completed_pieces.clone(),
+                &mut tx,
             );
             true
         } else {
@@ -235,6 +238,7 @@ fn handle_message(
     peer_state: &mut PeerState,
     progress: Arc<RwLock<TorrentProgress>>,
     completed_pieces: Arc<AtomicU64>,
+    tx: &mut Sender<Option<(u32, Vec<u8>)>>,
 ) {
     // println!("Message ID: {:?}, Length: {}", message.id, message.length);
 
@@ -332,14 +336,7 @@ fn handle_message(
                 // println!("Completed piece index: {}, writing to file", index);
                 progress.write().unwrap().needed_pieces.remove(&index);
 
-                progress
-                    .read()
-                    .unwrap()
-                    .journal
-                    .lock()
-                    .unwrap()
-                    .write_piece(index, &data)
-                    .unwrap();
+                tx.send(Some((index, data))).unwrap();
                 completed_pieces.fetch_add(1, SeqCst);
             }
         }
