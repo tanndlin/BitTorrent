@@ -21,7 +21,7 @@ services = {
             "./docker/torrents:/torrents",
         ],
         # RAM-backed so test downloads don't hit the disk; wiped when the container stops
-        "tmpfs": ["/downloads:size=4g"],
+        "tmpfs": ["/downloads:size=10g"],
         "develop": {
             "watch": [
                 {"action": "rebuild", "path": "./src"},
