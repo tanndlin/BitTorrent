@@ -285,6 +285,7 @@ pub struct BlockProgress {
 }
 
 pub struct PeerState {
+    #[allow(dead_code)]
     pub peer: String,
     pub is_choked: bool,
     pub inflight: u32,
