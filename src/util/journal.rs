@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fs::{self, File, OpenOptions},
     io::{Read, Seek, Write},
     path::Path,
@@ -9,7 +8,8 @@ pub struct Journal {
     // Handles are None once the download is finalized, so the files can be renamed/removed
     file: Option<File>,
     piece_size: usize,
-    pub pieces_written: HashMap<u32, bool>,
+    pieces_written: Vec<bool>,
+    num_pieces_written: u32,
     journal_file: Option<File>,
     journal_path: String,
     final_file_path: String,
@@ -53,17 +53,15 @@ impl Journal {
         let mut buffer = Vec::new();
         journal_file.read_to_end(&mut buffer)?;
         buffer.resize(total_pieces, 0);
-        let pieces_written = buffer
-            .iter()
-            .enumerate()
-            .map(|(i, &byte)| (i as u32, byte != 0))
-            .collect();
+        let pieces_written: Vec<bool> = buffer.iter().map(|&byte| byte != 0).collect();
+        let num_pieces_written = pieces_written.iter().filter(|v| **v).count() as u32;
 
         let total_pieces = total_pieces as u32;
         let mut journal = Journal {
             file: Some(file),
             piece_size,
             pieces_written,
+            num_pieces_written,
             journal_file: Some(journal_file),
             journal_path: journal_path.to_string(),
             final_file_path: file_path.to_string(),
@@ -72,7 +70,7 @@ impl Journal {
         };
 
         // A previous run may have written every piece without finalizing
-        if journal.num_written_pieces() == journal.total_pieces {
+        if journal.num_pieces_written == journal.total_pieces {
             journal.finalize()?;
         }
 
@@ -95,13 +93,15 @@ impl Journal {
         let offset = piece_index as u64 * self.piece_size as u64;
         file.seek(std::io::SeekFrom::Start(offset))?;
         file.write_all(data)?;
-        self.pieces_written.insert(piece_index, true);
 
         // Update the journal file
         journal_file.seek(std::io::SeekFrom::Start(piece_index as u64))?;
         journal_file.write_all(&[1])?;
+        if !std::mem::replace(&mut self.pieces_written[piece_index as usize], true) {
+            self.num_pieces_written += 1;
+        }
 
-        if self.num_written_pieces() == self.total_pieces {
+        if self.num_pieces_written == self.total_pieces {
             self.finalize()?;
         }
 
@@ -125,7 +125,14 @@ impl Journal {
     }
 
     pub fn num_written_pieces(&self) -> u32 {
-        self.pieces_written.iter().filter(|(_, v)| **v).count() as u32
+        self.num_pieces_written
+    }
+
+    pub fn is_written(&self, piece_index: u32) -> bool {
+        self.pieces_written
+            .get(piece_index as usize)
+            .copied()
+            .unwrap_or(false)
     }
 }
 
@@ -140,8 +147,8 @@ impl Drop for Journal {
         };
 
         let mut buffer = vec![0u8; self.total_pieces as usize];
-        for (&index, &written) in &self.pieces_written {
-            if let Some(byte) = buffer.get_mut(index as usize) {
+        for (index, &written) in self.pieces_written.iter().enumerate() {
+            if let Some(byte) = buffer.get_mut(index) {
                 *byte = written as u8;
             }
         }

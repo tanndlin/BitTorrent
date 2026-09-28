@@ -134,14 +134,7 @@ impl TorrentProgress {
         let pieces: Vec<_> = (0u32..torrent.total_length().div_ceil(torrent.info.piece_length)
             as u32)
             .map(|piece_index| {
-                let written = journal
-                    .lock()
-                    .unwrap()
-                    .pieces_written
-                    .get(&(piece_index))
-                    .copied()
-                    .unwrap_or(false);
-                if written {
+                if journal.lock().unwrap().is_written(piece_index) {
                     return Mutex::new(PieceProgress::Completed);
                 }
 
