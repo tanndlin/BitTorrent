@@ -127,7 +127,8 @@ pub fn connect_to_peer(
                 .unwrap()
             {
                 let mut start = 0;
-                while start < torrent.get_piece_length(*piece_index as usize)
+                let mut begin = 0;
+                while begin < torrent.get_piece_length(*piece_index as usize)
                     && peer_state.inflight < MAX_INFLIGHT_REQUESTS
                 {
                     // println!(
@@ -136,20 +137,22 @@ pub fn connect_to_peer(
                     //     start,
                     //     16 * 1024
                     // );
-                    let block_progress = piece_progress.data.get_mut(&start).unwrap();
+                    let block_progress = piece_progress.data.get_mut(start as usize).unwrap();
                     if block_progress.inflight || block_progress.complete {
-                        start += 16 * 1024;
+                        start += 1;
+                        begin += 16 * 1024;
                         continue;
                     }
 
-                    PeerMessage::create_request(*piece_index, start, block_progress.length)
+                    PeerMessage::create_request(*piece_index, begin, block_progress.length)
                         .encode_to(&mut request_bytes);
 
                     // Mark block as inflight
                     block_progress.inflight = true;
 
                     peer_state.inflight += 1;
-                    start += 16 * 1024;
+                    start += 1;
+                    begin += 16 * 1024;
                 }
             }
         }
@@ -295,7 +298,9 @@ fn handle_message(
             let progress_read = progress.read().unwrap();
             let mut piece = progress_read.pieces[index as usize].lock().unwrap();
             let final_data = if let PieceProgress::InProgress(piece_progress) = &mut *piece {
-                piece_progress.add_data(begin, block);
+                if begin % (16 * 1024) == 0 {
+                    piece_progress.add_data((begin / (16 * 1024)) as usize, block);
+                }
 
                 match piece_progress.get_final_data() {
                     Ok(Some(data)) => {

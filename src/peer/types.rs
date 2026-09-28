@@ -1,6 +1,6 @@
 use sha1::{Digest, Sha1};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     sync::{mpsc::Receiver, Arc, Mutex},
     thread::{self, JoinHandle},
 };
@@ -195,25 +195,22 @@ pub struct PieceProgressData {
     total_blocks: u32,
     completed_blocks: u32,
     buffer: Vec<u8>, // length bytes, allocated on first block to save upfront memory cost
-    pub data: HashMap<u32, BlockProgress>,
+    pub data: Vec<BlockProgress>,
     expected_hash: [u8; 20],
 }
 
 impl PieceProgressData {
     pub fn new(index: u32, length: u32, expected_hash: [u8; 20]) -> Self {
         let block_size = 16 * 1024; // 16 KB blocks
-        let mut data = HashMap::new();
+        let mut data = vec![];
         let mut offset = 0;
         while offset < length {
             let block_length = std::cmp::min(block_size, length - offset);
-            data.insert(
-                offset,
-                BlockProgress {
-                    length: block_length,
-                    inflight: false,
-                    complete: false,
-                },
-            );
+            data.push(BlockProgress {
+                length: block_length,
+                inflight: false,
+                complete: false,
+            });
             offset += block_length;
         }
 
@@ -250,14 +247,14 @@ impl PieceProgressData {
 
     pub fn reset(&mut self) {
         self.completed_blocks = 0;
-        self.data.iter_mut().for_each(|(_, block)| {
+        self.data.iter_mut().for_each(|block| {
             block.inflight = false;
             block.complete = false;
         });
     }
 
-    pub fn add_data(&mut self, begin: u32, block: &[u8]) -> bool {
-        let Some(slot) = self.data.get_mut(&begin) else {
+    pub fn add_data(&mut self, index: usize, block: &[u8]) -> bool {
+        let Some(slot) = self.data.get_mut(index) else {
             return false;
         };
         if slot.length != block.len() as u32 {
@@ -273,7 +270,9 @@ impl PieceProgressData {
         if self.buffer.is_empty() {
             self.buffer = vec![0; self.length as usize];
         }
-        self.buffer[begin as usize..begin as usize + block.len()].copy_from_slice(block);
+
+        let begin = 16 * 1024 * index;
+        self.buffer[begin..begin + block.len()].copy_from_slice(block);
         true
     }
 }
