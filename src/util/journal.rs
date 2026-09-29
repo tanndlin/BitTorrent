@@ -28,8 +28,8 @@ pub struct Journal {
     piece_size: usize,
     pieces_written: Vec<bool>,
     num_pieces_written: u32,
-    journal_file: Option<File>,
-    journal_path: PathBuf,
+    file: Option<File>,
+    path: PathBuf,
     total_pieces: u32,
     completed: bool,
 }
@@ -92,8 +92,8 @@ impl Journal {
             piece_size,
             pieces_written,
             num_pieces_written,
-            journal_file: Some(journal_file),
-            journal_path,
+            file: Some(journal_file),
+            path: journal_path,
             total_pieces,
             completed: false,
         };
@@ -120,7 +120,7 @@ impl Journal {
             ));
         }
 
-        let Some(journal_file) = &mut self.journal_file else {
+        let Some(journal_file) = &mut self.file else {
             // Already finalized, nothing left to write
             return Ok(());
         };
@@ -189,7 +189,7 @@ impl Journal {
         }
         println!("Verified {verified}/{checked} pieces from existing files");
 
-        if let Some(journal_file) = &mut self.journal_file {
+        if let Some(journal_file) = &mut self.file {
             let bytes: Vec<u8> = self.pieces_written.iter().map(|&w| w as u8).collect();
             journal_file.seek(std::io::SeekFrom::Start(0))?;
             journal_file.write_all(&bytes)?;
@@ -204,7 +204,7 @@ impl Journal {
         }
         // Windows refuses to rename or delete files with open handles, so close them first
         let targets = std::mem::take(&mut self.targets);
-        self.journal_file = None;
+        self.file = None;
 
         for target in targets {
             let Target {
@@ -231,7 +231,7 @@ impl Journal {
                 adopted: false,
             });
         }
-        fs::remove_file(&self.journal_path)?;
+        fs::remove_file(&self.path)?;
         self.completed = true;
 
         println!("File saved successfully!");
@@ -395,7 +395,7 @@ impl Drop for Journal {
         if self.completed {
             return;
         }
-        let Some(journal_file) = &mut self.journal_file else {
+        let Some(journal_file) = &mut self.file else {
             return;
         };
 

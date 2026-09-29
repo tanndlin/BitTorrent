@@ -24,6 +24,8 @@ impl KRPCRequestPing {
     }
 }
 
+// Field names match the other KRPC messages (`transaction_id`, `node_id`)
+#[allow(clippy::struct_field_names)]
 pub struct KRPCRequestFindNode {
     transaction_id: [u8; 2],
     node_id: [u8; 20],
