@@ -83,7 +83,7 @@ pub fn connect_to_peer(
     while !cancel.is_cancelled() {
         if let Some(message) = peer_message_stream.try_read_message()? {
             handle_message(
-                &message,
+                message,
                 &mut peer_state,
                 &mut peer_message_stream,
                 progress,
@@ -236,7 +236,7 @@ fn handle_handshake(
 }
 
 fn handle_message(
-    message: &PeerMessage,
+    message: PeerMessage,
     peer_state: &mut PeerState,
     peer_message_stream: &mut PeerMessageStream,
     progress: &Arc<RwLock<TorrentProgress>>,
@@ -278,7 +278,7 @@ fn handle_message(
             //     "{} - Received bitfield: {:?}",
             //     peer_state.peer, message.payload
             // );
-            peer_state.bitfield = message.payload.clone();
+            peer_state.bitfield = message.payload;
         }
         PeerMessageID::Request => {
             let index = u32::from_be_bytes(message.payload[0..4].try_into().unwrap());
