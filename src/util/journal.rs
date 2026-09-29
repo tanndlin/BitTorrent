@@ -1,45 +1,39 @@
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Seek, Write},
-    path::Path,
+    path::PathBuf,
 };
 
+use crate::bencoding::torrent;
+
+struct Target {
+    file: File,
+    start: u64,
+    length: u64,
+    tmp_path: PathBuf,
+    final_path: PathBuf,
+    renamed: bool,
+}
+
 pub struct Journal {
-    // Handles are None once the download is finalized, so the files can be renamed/removed
-    file: Option<File>,
+    targets: Vec<Target>,
     piece_size: usize,
     pieces_written: Vec<bool>,
     num_pieces_written: u32,
     journal_file: Option<File>,
     journal_path: String,
-    final_file_path: String,
     total_pieces: u32,
     completed: bool,
 }
 
 impl Journal {
-    pub fn new(file_path: &str, file_size: usize, piece_size: usize) -> std::io::Result<Self> {
+    pub fn new(
+        file_path: &str,
+        file_size: usize,
+        piece_size: usize,
+        files: Vec<torrent::File>,
+    ) -> std::io::Result<Self> {
         let total_pieces = file_size.div_ceil(piece_size);
-
-        let temp_file_path = &format!("{file_path}.tmp");
-        let file = if Path::new(temp_file_path).exists() {
-            let existing_file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(temp_file_path)?;
-            let metadata = existing_file.metadata()?;
-            if metadata.len() as usize != file_size {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Existing file size does not match expected size",
-                ));
-            }
-            existing_file
-        } else {
-            let new_file = File::create(temp_file_path)?;
-            new_file.set_len(file_size as u64)?;
-            new_file
-        };
 
         let journal_path = &format!("{}{}", file_path, ".journal");
         let mut journal_file = OpenOptions::new()
@@ -55,16 +49,39 @@ impl Journal {
         buffer.resize(total_pieces, 0);
         let pieces_written: Vec<bool> = buffer.iter().map(|&byte| byte != 0).collect();
         let num_pieces_written = pieces_written.iter().filter(|v| **v).count() as u32;
+        let all_written = num_pieces_written as usize == total_pieces;
+
+        let layout = if files.is_empty() {
+            vec![(PathBuf::from(file_path), file_size as u64)]
+        } else {
+            files
+                .iter()
+                .map(|file| Ok((safe_path(file_path, &file.path)?, file.length as u64)))
+                .collect::<std::io::Result<Vec<_>>>()?
+        };
+
+        let mut targets = Vec::with_capacity(layout.len());
+        let mut start = 0;
+        for (final_path, length) in layout {
+            targets.push(open_target(final_path, start, length, all_written)?);
+            start += length;
+        }
+
+        if start != file_size as u64 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "File lengths do not add up to the torrent length",
+            ));
+        }
 
         let total_pieces = total_pieces as u32;
         let mut journal = Journal {
-            file: Some(file),
+            targets,
             piece_size,
             pieces_written,
             num_pieces_written,
             journal_file: Some(journal_file),
             journal_path: journal_path.to_string(),
-            final_file_path: file_path.to_string(),
             total_pieces,
             completed: false,
         };
@@ -85,14 +102,31 @@ impl Journal {
             ));
         }
 
-        let (Some(file), Some(journal_file)) = (&mut self.file, &mut self.journal_file) else {
+        let Some(journal_file) = &mut self.journal_file else {
             // Already finalized, nothing left to write
             return Ok(());
         };
 
-        let offset = piece_index as u64 * self.piece_size as u64;
-        file.seek(std::io::SeekFrom::Start(offset))?;
-        file.write_all(data)?;
+        let piece_start = piece_index as u64 * self.piece_size as u64;
+        let piece_end = piece_start + data.len() as u64;
+        let first = self
+            .targets
+            .partition_point(|t| t.start + t.length <= piece_start);
+
+        for target in &mut self.targets[first..] {
+            if target.start >= piece_end {
+                break;
+            }
+            let from = piece_start.max(target.start);
+            let to = piece_end.min(target.start + target.length);
+            if from >= to {
+                continue;
+            }
+            target.file.seek(std::io::SeekFrom::Start(from - target.start))?;
+            target
+                .file
+                .write_all(&data[(from - piece_start) as usize..(to - piece_start) as usize])?;
+        }
 
         // Update the journal file
         journal_file.seek(std::io::SeekFrom::Start(piece_index as u64))?;
@@ -108,18 +142,31 @@ impl Journal {
         Ok(())
     }
 
-    /// Closes the file handles, moves the temp file to its final path and deletes the journal
+    /// Closes the file handles, moves the temp files to their final paths and deletes the journal
     fn finalize(&mut self) -> std::io::Result<()> {
-        if let Some(file) = self.file.take() {
-            file.sync_all()?;
+        for target in &self.targets {
+            target.file.sync_all()?;
         }
         // Windows refuses to rename or delete files with open handles, so close them first
+        let targets = std::mem::take(&mut self.targets);
         self.journal_file = None;
 
-        let tmp_path = format!("{}.tmp", self.final_file_path);
-        fs::rename(tmp_path, &self.final_file_path)?;
+        for target in targets {
+            let Target {
+                file,
+                tmp_path,
+                final_path,
+                renamed,
+                ..
+            } = target;
+            drop(file);
+            if !renamed {
+                fs::rename(tmp_path, final_path)?;
+            }
+        }
         fs::remove_file(&self.journal_path)?;
         self.completed = true;
+
         println!("File saved successfully!");
         Ok(())
     }
@@ -134,6 +181,67 @@ impl Journal {
             .copied()
             .unwrap_or(false)
     }
+}
+
+fn safe_path(root: &str, components: &[String]) -> std::io::Result<PathBuf> {
+    let mut path = PathBuf::from(root);
+    for component in components {
+        if component.is_empty()
+            || component == "."
+            || component == ".."
+            || component.contains(['/', '\\', ':'])
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Unsafe path in torrent: {components:?}"),
+            ));
+        }
+        path.push(component);
+    }
+    Ok(path)
+}
+
+fn open_target(
+    final_path: PathBuf,
+    start: u64,
+    length: u64,
+    all_written: bool,
+) -> std::io::Result<Target> {
+    let mut tmp_path = final_path.clone().into_os_string();
+    tmp_path.push(".tmp");
+    let tmp_path = PathBuf::from(tmp_path);
+
+    let (file, renamed) = if tmp_path.exists() {
+        (OpenOptions::new().read(true).write(true).open(&tmp_path)?, false)
+    } else if all_written && final_path.exists() {
+        (OpenOptions::new().read(true).write(true).open(&final_path)?, true)
+    } else {
+        if let Some(parent) = final_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let new_file = File::create(&tmp_path)?;
+        new_file.set_len(length)?;
+        (new_file, false)
+    };
+
+    if file.metadata()?.len() != length {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "Existing file size does not match expected size: {}",
+                tmp_path.display()
+            ),
+        ));
+    }
+
+    Ok(Target {
+        file,
+        start,
+        length,
+        tmp_path,
+        final_path,
+        renamed,
+    })
 }
 
 impl Drop for Journal {
