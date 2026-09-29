@@ -5,26 +5,23 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use crate::{bencoding::torrent::Torrent, connection::Peer, util::Journal};
+use crate::{bencoding::torrent::Torrent, connection::Peer, peer::WireBytes, util::Journal};
 
 #[derive(Debug)]
 pub struct PeerHandshake {
-    pub pstr: String,
     pub reserved: [u8; 8],
     pub info_hash: [u8; 20],
     pub peer_id: [u8; 20],
 }
 
-impl From<&PeerHandshake> for Vec<u8> {
-    fn from(handshake: &PeerHandshake) -> Vec<u8> {
-        let mut buf = vec![];
-        buf.push(handshake.pstr.len() as u8);
-        buf.extend_from_slice(handshake.pstr.as_bytes());
-        buf.extend_from_slice(&handshake.reserved);
-        buf.extend_from_slice(&handshake.info_hash);
-        buf.extend_from_slice(&handshake.peer_id);
-
-        buf
+impl WireBytes for PeerHandshake {
+    fn write_to(&self, out: &mut impl std::io::Write) -> std::io::Result<()> {
+        out.write_all(&[19])?;
+        out.write_all(b"BitTorrent protocol")?;
+        out.write_all(&self.reserved)?;
+        out.write_all(&self.info_hash)?;
+        out.write_all(&self.peer_id)?;
+        Ok(())
     }
 }
 
@@ -39,7 +36,6 @@ impl TryFrom<[u8; 68]> for PeerHandshake {
         }
 
         Ok(PeerHandshake {
-            pstr: String::from_utf8_lossy(PSTR).into_owned(),
             reserved: bytes[20..28].try_into().unwrap(),
             info_hash: bytes[28..48].try_into().unwrap(),
             peer_id: bytes[48..68].try_into().unwrap(),
@@ -71,18 +67,18 @@ pub struct PeerMessage {
 }
 
 impl PeerMessage {
-    pub fn encode_to(self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&(self.length).to_be_bytes());
+    pub fn encode_to(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.length.to_be_bytes());
         buf.push(self.id as u8);
-        buf.extend(self.payload);
+        buf.extend_from_slice(&self.payload);
     }
 }
 
-impl From<PeerMessage> for Vec<u8> {
-    fn from(message: PeerMessage) -> Self {
-        let mut buf = vec![];
-        message.encode_to(&mut buf);
-        buf
+impl WireBytes for PeerMessage {
+    fn write_to(&self, out: &mut impl std::io::Write) -> std::io::Result<()> {
+        let mut buf = Vec::with_capacity(5 + self.payload.len());
+        self.encode_to(&mut buf);
+        out.write_all(&buf)
     }
 }
 

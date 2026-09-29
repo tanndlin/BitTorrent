@@ -1,7 +1,7 @@
-use std::{collections::VecDeque, io::Write, net::TcpStream, time::Duration};
+use std::{collections::VecDeque, net::TcpStream, time::Duration};
 
 use crate::{
-    peer::{PeerMessage, PeerMessageID, PeerProtocolError},
+    peer::{PeerMessage, PeerMessageID, PeerProtocolError, WireBytes},
     util::greedy_tcp_stream::GreedyTcpStream,
 };
 
@@ -16,8 +16,8 @@ impl PeerMessageStream {
         }
     }
 
-    pub fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-        self.stream.stream.write_all(buf)
+    pub fn write_all(&mut self, msg: &impl WireBytes) -> std::io::Result<()> {
+        msg.write_to(&mut self.stream.stream)
     }
 
     pub fn set_read_timeout(&self, dur: Duration) -> std::io::Result<()> {

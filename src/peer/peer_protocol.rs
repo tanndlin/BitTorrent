@@ -76,10 +76,8 @@ pub fn connect_to_peer(
         .set_read_timeout(Duration::from_millis(1))
         .map_err(|_| PeerProtocolError::ConnectionClosed)?;
 
-    let interested_bytes = Vec::from(PeerMessage::create_interested());
-    // println!("Sending interested message: {:?}", interested_bytes);
     peer_message_stream
-        .write_all(&interested_bytes)
+        .write_all(&PeerMessage::create_interested())
         .map_err(|_| PeerProtocolError::ConnectionClosed)?;
 
     let mut rand = rand::rng();
@@ -181,15 +179,13 @@ fn handle_handshake(
     let mut reserved = [0; 8];
     reserved[5] |= 0x10;
     let handshake_request = PeerHandshake {
-        pstr: "BitTorrent protocol".to_owned(),
         reserved,
         info_hash: torrent.info_hash,
         peer_id: *b"-TR2940-fuckmek6wWLc",
     };
-    let handshake_bytes = Vec::from(&handshake_request);
-    // println!("{} - Sending handshake: {:?}", peer, handshake_bytes);
+
     peer_message_stream
-        .write_all(&handshake_bytes)
+        .write_all(&handshake_request)
         .map_err(|e| {
             PeerProtocolError::HandshakeError(format!("Failed to send handshake: {}", e))
         })?;
@@ -229,15 +225,14 @@ fn handle_handshake(
         length: (1 + bitfield_payload.len()) as u32,
         payload: bitfield_payload,
     };
-    let bitfield_bytes = Vec::from(bitfield_message);
     peer_message_stream
-        .write_all(&bitfield_bytes)
+        .write_all(&bitfield_message)
         .map_err(|_| {
             PeerProtocolError::HandshakeError("Failed to send bitfield message".to_string())
         })?;
 
     peer_message_stream
-        .write_all(&Vec::from(PeerMessage::create_unchoke()))
+        .write_all(&PeerMessage::create_unchoke())
         .map_err(|_| {
             PeerProtocolError::HandshakeError("Failed to send unchoke message".to_string())
         })?;
@@ -302,7 +297,7 @@ fn handle_message(
             let block = progress.read().unwrap().get_block(index, begin, length);
             match block {
                 Ok(data) => peer_message_stream
-                    .write_all(&Vec::from(PeerMessage::create_piece(index, begin, &data)))
+                    .write_all(&PeerMessage::create_piece(index, begin, &data))
                     .map_err(|_| PeerProtocolError::ConnectionClosed)?,
                 Err(e) => println!("{} - Ignoring request: {e}", peer_state.peer),
             }
