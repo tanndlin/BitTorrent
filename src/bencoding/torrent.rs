@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 pub static DICTIONARY_START: u8 = b'd';
@@ -8,7 +10,7 @@ pub static LIST_START: u8 = b'l';
 pub static LIST_END: u8 = b'e';
 pub static COLON: u8 = b':';
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Torrent {
     pub trackers: Vec<Tracker>,
     pub info: Info,
@@ -24,7 +26,19 @@ pub struct Info {
     pub files: Option<Vec<File>>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+impl fmt::Debug for Info {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Info")
+            .field("name", &self.name)
+            .field("piece_length", &self.piece_length)
+            .field("pieces", &format_args!("[{} hashes]", self.pieces.len()))
+            .field("length", &self.length)
+            .field("files", &self.files)
+            .finish()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct File {
     pub length: i64,
     pub path: Vec<String>,
