@@ -245,6 +245,7 @@ fn handle_message(
 ) -> Result<(), PeerProtocolError> {
     // println!("Message ID: {:?}, Length: {}", message.id, message.length);
 
+    #[allow(clippy::match_same_arms)]
     match message.id {
         PeerMessageID::KeepAlive => {
             // println!("Received keep-alive message");

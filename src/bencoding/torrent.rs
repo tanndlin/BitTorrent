@@ -91,9 +91,7 @@ pub enum Tracker {
 impl From<Tracker> for String {
     fn from(tracker: Tracker) -> Self {
         match tracker {
-            Tracker::Http(url) => url,
-            Tracker::Udp(url) => url,
-            Tracker::Dht(url) => url,
+            Tracker::Http(url) | Tracker::Udp(url) | Tracker::Dht(url) => url,
         }
     }
 }
