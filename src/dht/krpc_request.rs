@@ -1,5 +1,5 @@
 use crate::bencoding::{decode::Value, encode};
-use rand::Rng;
+use rand::RngExt;
 use std::collections::HashMap;
 
 pub enum KRPCRequest {
