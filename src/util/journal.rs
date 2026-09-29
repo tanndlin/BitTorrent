@@ -39,7 +39,7 @@ impl Journal {
         file_path: impl AsRef<Path>,
         file_size: usize,
         piece_size: usize,
-        files: Vec<torrent::File>,
+        files: &[torrent::File],
         piece_hashes: &[[u8; 20]],
     ) -> std::io::Result<Self> {
         let file_path = file_path.as_ref();

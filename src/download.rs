@@ -24,21 +24,18 @@ const TRACKER_RETRY_DELAY: Duration = Duration::from_secs(60);
 pub fn download_torrent_from_path(
     path: impl AsRef<Path>,
     no_seed: bool,
-    cancel: CancellationToken,
+    cancel: &CancellationToken,
 ) {
     let torrent = Torrent::read(path).unwrap();
-    download_torrent(torrent, Arc::new(AtomicU64::new(0)), no_seed, cancel);
+    download_torrent(torrent, no_seed, cancel);
 }
 
 /// Downloads the torrent, then seeds until `cancel` is cancelled (unless `no_seed`)
-pub fn download_torrent(
-    torrent: Torrent,
-    completed_pieces: Arc<AtomicU64>,
-    no_seed: bool,
-    cancel: CancellationToken,
-) {
+#[allow(clippy::cast_precision_loss)]
+pub fn download_torrent(torrent: Torrent, no_seed: bool, cancel: &CancellationToken) {
     dbg!(&torrent.trackers);
 
+    let completed_pieces = Arc::new(AtomicU64::new(0));
     let start_time = std::time::Instant::now();
 
     let (tx, rx) = mpsc::channel();
@@ -141,8 +138,8 @@ pub fn download_torrent(
                         match connect_to_peer(
                             &peer,
                             &torrent,
-                            progress.clone(),
-                            completed_pieces.clone(),
+                            &progress,
+                            &completed_pieces,
                             tx,
                             &cancel,
                         ) {
@@ -207,7 +204,7 @@ fn get_peers_from_torrent(
         .collect();
 
     if http_trackers.is_empty() {
-        return get_peers_dht(&torrent.info_hash, dht_trackers);
+        return get_peers_dht(&torrent.info_hash, &dht_trackers);
     }
 
     let now = Instant::now();
@@ -258,7 +255,7 @@ fn get_peers_from_torrent(
         .collect())
 }
 
-fn get_peers_dht(info_hash: &[u8; 20], trackers: Vec<String>) -> Result<Vec<Peer>, String> {
+fn get_peers_dht(info_hash: &[u8; 20], trackers: &[String]) -> Result<Vec<Peer>, String> {
     println!("No HTTP trackers found, falling back to DHT");
     DhtClient::new(trackers).get_peers(info_hash)
 }

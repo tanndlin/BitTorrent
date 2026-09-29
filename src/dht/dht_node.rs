@@ -21,7 +21,7 @@ pub struct DhtClient {
 }
 
 impl DhtClient {
-    pub fn new(trackers: Vec<String>) -> Self {
+    pub fn new(trackers: &[String]) -> Self {
         let socket = UdpSocket::bind("0.0.0.0:6881").unwrap();
         socket
             .set_read_timeout(Some(Duration::from_secs(1)))

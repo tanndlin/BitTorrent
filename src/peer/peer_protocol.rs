@@ -46,8 +46,8 @@ impl Display for PeerProtocolError {
 pub fn connect_to_peer(
     peer: &Peer,
     torrent: &Torrent,
-    progress: Arc<RwLock<TorrentProgress>>,
-    num_completed_pieces: Arc<AtomicU64>,
+    progress: &Arc<RwLock<TorrentProgress>>,
+    num_completed_pieces: &Arc<AtomicU64>,
     mut tx: Sender<Option<(u32, Vec<u8>)>>,
     cancel: &CancellationToken,
 ) -> Result<(), PeerProtocolError> {
@@ -67,7 +67,7 @@ pub fn connect_to_peer(
 
     let num_bitfield_bytes = torrent.info.pieces.len().div_ceil(8);
     let mut peer_state = PeerState::new(peer.clone(), num_bitfield_bytes);
-    handle_handshake(torrent, &progress, &mut peer_message_stream)?;
+    handle_handshake(torrent, progress, &mut peer_message_stream)?;
 
     // The handshake needs the long timeout; after that, reads should return
     // quickly so the loop can keep sending requests
@@ -86,8 +86,8 @@ pub fn connect_to_peer(
                 &message,
                 &mut peer_state,
                 &mut peer_message_stream,
-                progress.clone(),
-                num_completed_pieces.clone(),
+                progress,
+                num_completed_pieces,
                 &mut tx,
             )?;
         };
@@ -239,8 +239,8 @@ fn handle_message(
     message: &PeerMessage,
     peer_state: &mut PeerState,
     peer_message_stream: &mut PeerMessageStream,
-    progress: Arc<RwLock<TorrentProgress>>,
-    completed_pieces: Arc<AtomicU64>,
+    progress: &Arc<RwLock<TorrentProgress>>,
+    completed_pieces: &Arc<AtomicU64>,
     tx: &mut Sender<Option<(u32, Vec<u8>)>>,
 ) -> Result<(), PeerProtocolError> {
     // println!("Message ID: {:?}, Length: {}", message.id, message.length);

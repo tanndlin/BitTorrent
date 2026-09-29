@@ -144,7 +144,7 @@ impl TorrentProgress {
                 &torrent.info.name,
                 torrent.total_length() as usize,
                 torrent.info.piece_length as usize,
-                torrent.info.files.clone().unwrap_or_default(),
+                &torrent.info.files.clone().unwrap_or_default(),
                 &torrent.info.pieces,
             )
             .unwrap(),
