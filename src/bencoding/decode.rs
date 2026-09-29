@@ -17,9 +17,10 @@ pub fn parse_metainfo(content: &[u8]) -> Torrent {
             if let Value::List(tier_list) = tier {
                 for url in tier_list {
                     if let Value::Str(s) = url {
-                        trackers.push(match s.starts_with("http") {
-                            true => Tracker::Http(s.clone()),
-                            false => Tracker::Udp(s.clone()),
+                        trackers.push(if s.starts_with("http") {
+                            Tracker::Http(s.clone())
+                        } else {
+                            Tracker::Udp(s.clone())
                         });
                     }
                 }
@@ -27,9 +28,10 @@ pub fn parse_metainfo(content: &[u8]) -> Torrent {
         }
         trackers
     } else if let Some(Value::Str(announce)) = dict.get("announce") {
-        vec![match announce.starts_with("http") {
-            true => Tracker::Http(announce.clone()),
-            false => Tracker::Udp(announce.clone()),
+        vec![if announce.starts_with("http") {
+            Tracker::Http(announce.clone())
+        } else {
+            Tracker::Udp(announce.clone())
         }]
     } else {
         vec![]
