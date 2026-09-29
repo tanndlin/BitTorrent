@@ -387,7 +387,7 @@ fn check_udp_tracker(url: &str) -> Result<bool, String> {
         UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind socket: {}", e))?;
 
     // 2. Define the target URL (hostname and port).
-    let target_url: String = url.trim_start_matches("udp://").to_string(); // Replace with your target URL and port
+    let target_url = url.trim_start_matches("udp://"); // Replace with your target URL and port
     println!("{target_url}");
 
     // 3. Resolve the target URL to a SocketAddr.

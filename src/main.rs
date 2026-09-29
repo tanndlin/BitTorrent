@@ -21,9 +21,5 @@ fn main() {
     let handler_cancel = cancel.clone();
     ctrlc::set_handler(move || handler_cancel.cancel()).expect("Failed to set Ctrl+C handler");
 
-    download_torrent_from_path(
-        path.to_str().expect("Path is not valid UTF-8"),
-        args.no_seed,
-        cancel,
-    );
+    download_torrent_from_path(path, args.no_seed, cancel);
 }

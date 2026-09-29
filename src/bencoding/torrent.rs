@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, path::Path};
 
 use serde::{Deserialize, Serialize};
 
@@ -47,7 +47,7 @@ pub struct File {
 }
 
 impl Torrent {
-    pub fn read(path: &str) -> Result<Self, String> {
+    pub fn read(path: impl AsRef<Path>) -> Result<Self, String> {
         let content =
             std::fs::read(path).map_err(|e| format!("Unable to read torrent file: {e}"))?;
         Ok(decode::parse_metainfo(&content))

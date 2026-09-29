@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     io::Write,
+    path::Path,
     sync::{
         atomic::{AtomicU64, Ordering::SeqCst},
         mpsc, Arc, RwLock,
@@ -20,7 +21,11 @@ use crate::{
 const PEER_RETRY_DELAY: Duration = Duration::from_secs(30);
 const TRACKER_RETRY_DELAY: Duration = Duration::from_secs(60);
 
-pub fn download_torrent_from_path(path: &str, no_seed: bool, cancel: CancellationToken) {
+pub fn download_torrent_from_path(
+    path: impl AsRef<Path>,
+    no_seed: bool,
+    cancel: CancellationToken,
+) {
     let torrent = Torrent::read(path).unwrap();
     download_torrent(torrent, Arc::new(AtomicU64::new(0)), no_seed, cancel);
 }

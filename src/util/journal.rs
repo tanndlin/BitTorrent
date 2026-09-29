@@ -1,7 +1,7 @@
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Seek, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use sha1::{Digest, Sha1};
@@ -29,28 +29,31 @@ pub struct Journal {
     pieces_written: Vec<bool>,
     num_pieces_written: u32,
     journal_file: Option<File>,
-    journal_path: String,
+    journal_path: PathBuf,
     total_pieces: u32,
     completed: bool,
 }
 
 impl Journal {
     pub fn new(
-        file_path: &str,
+        file_path: impl AsRef<Path>,
         file_size: usize,
         piece_size: usize,
         files: Vec<torrent::File>,
         piece_hashes: &[[u8; 20]],
     ) -> std::io::Result<Self> {
+        let file_path = file_path.as_ref();
         let total_pieces = file_size.div_ceil(piece_size);
 
-        let journal_path = &format!("{}{}", file_path, ".journal");
+        let mut journal_path = file_path.as_os_str().to_owned();
+        journal_path.push(".journal");
+        let journal_path = PathBuf::from(journal_path);
         let mut journal_file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
-            .open(journal_path)?;
+            .open(&journal_path)?;
 
         // Tolerate a short or missing journal: anything not recorded is treated as not written
         let mut buffer = Vec::new();
@@ -61,7 +64,7 @@ impl Journal {
         let all_written = num_pieces_written as usize == total_pieces;
 
         let layout = if files.is_empty() {
-            vec![(PathBuf::from(file_path), file_size as u64)]
+            vec![(file_path.to_path_buf(), file_size as u64)]
         } else {
             files
                 .iter()
@@ -90,7 +93,7 @@ impl Journal {
             pieces_written,
             num_pieces_written,
             journal_file: Some(journal_file),
-            journal_path: journal_path.to_string(),
+            journal_path,
             total_pieces,
             completed: false,
         };
@@ -306,7 +309,7 @@ fn read_range(targets: &mut [Target], start: u64, buf: &mut [u8]) -> std::io::Re
     Ok(())
 }
 
-fn safe_path(root: &str, components: &[String]) -> std::io::Result<PathBuf> {
+fn safe_path(root: &Path, components: &[String]) -> std::io::Result<PathBuf> {
     let mut path = PathBuf::from(root);
     for component in components {
         if component.is_empty()
