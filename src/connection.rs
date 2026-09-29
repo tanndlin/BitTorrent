@@ -1,7 +1,7 @@
 use core::panic;
 use std::{
     collections::HashMap,
-    fmt::Display,
+    fmt::{Display, Write},
     net::{IpAddr, Ipv4Addr, ToSocketAddrs, UdpSocket},
     str::FromStr,
 };
@@ -55,19 +55,20 @@ pub struct TrackerRequest {
     pub tracker_id: Option<String>,
 }
 
+/// Percent-encodes every byte, e.g. `[0xab, 0x01]` -> `"%ab%01"`
+fn percent_encode(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 3), |mut s, b| {
+            let _ = write!(s, "%{b:02x}");
+            s
+        })
+}
+
 impl TrackerRequest {
     pub fn to_url_params(&self) -> String {
-        let info_hash_encoded = self
-            .info_hash
-            .iter()
-            .map(|b| format!("%{:02x}", b))
-            .collect::<String>();
-
-        let peer_id_encoded = self
-            .peer_id
-            .iter()
-            .map(|b| format!("%{:02x}", b))
-            .collect::<String>();
+        let info_hash_encoded = percent_encode(&self.info_hash);
+        let peer_id_encoded = percent_encode(&self.peer_id);
 
         format!(
             "?info_hash={}&peer_id={}&port={}&uploaded={}&downloaded={}&left={}&compact={}&no_peer_id={}&event={}&ip={}&num_want={}&key={}&tracker_id={}",
