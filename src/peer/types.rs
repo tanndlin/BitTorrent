@@ -308,8 +308,7 @@ pub struct BlockProgress {
 }
 
 pub struct PeerState {
-    #[allow(dead_code)]
-    pub peer: String,
+    pub peer: Peer,
     pub is_choked: bool,
     pub inflight: u32,
     pub bitfield: Vec<u8>,
@@ -317,7 +316,7 @@ pub struct PeerState {
 }
 
 impl PeerState {
-    pub fn new(peer: String, num_bitfield_bytes: usize) -> Self {
+    pub fn new(peer: Peer, num_bitfield_bytes: usize) -> Self {
         let is_choked = true;
         let inflight = 0u32;
         let bitfield: Vec<u8> = vec![0; num_bitfield_bytes];

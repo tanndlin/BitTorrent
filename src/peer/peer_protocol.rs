@@ -62,11 +62,13 @@ pub fn connect_to_peer(
     stream
         .set_write_timeout(Some(IO_TIMEOUT))
         .map_err(|_| PeerProtocolError::FailedToConnect)?;
-    let peer = format!("{}:{}", peer.ip, peer.port);
     // println!("{} - Connected", peer);
 
     let mut peer_message_stream = PeerMessageStream::new(stream);
-    let mut peer_state = handle_handshake(torrent, &progress, &mut peer_message_stream, peer)?;
+
+    let num_bitfield_bytes = torrent.info.pieces.len().div_ceil(8);
+    let mut peer_state = PeerState::new(peer.clone(), num_bitfield_bytes);
+    handle_handshake(torrent, &progress, &mut peer_message_stream)?;
 
     // The handshake needs the long timeout; after that, reads should return
     // quickly so the loop can keep sending requests
@@ -175,8 +177,7 @@ fn handle_handshake(
     torrent: &Torrent,
     progress: &Arc<RwLock<TorrentProgress>>,
     peer_message_stream: &mut PeerMessageStream,
-    peer: String,
-) -> Result<PeerState, PeerProtocolError> {
+) -> Result<(), PeerProtocolError> {
     let mut reserved = [0; 8];
     reserved[5] |= 0x10;
     let handshake_request = PeerHandshake {
@@ -204,7 +205,6 @@ fn handle_handshake(
     PeerHandshake::try_from(response_buf).map_err(PeerProtocolError::HandshakeError)?;
 
     let num_bitfield_bytes = torrent.info.pieces.len().div_ceil(8);
-    let peer_state = PeerState::new(peer, num_bitfield_bytes);
     let mut bitfield_payload = vec![0; num_bitfield_bytes];
     {
         let progress = progress.read().unwrap();
@@ -236,7 +236,7 @@ fn handle_handshake(
             PeerProtocolError::HandshakeError("Failed to send unchoke message".to_string())
         })?;
 
-    Ok(peer_state)
+    Ok(())
 }
 
 fn handle_message(
