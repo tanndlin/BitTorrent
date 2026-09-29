@@ -109,7 +109,8 @@ impl Display for TrackerResponseError {
 #[derive(Debug)]
 pub struct TrackerResponseGood {
     _warning_message: Option<String>,
-    _interval: u32,
+    /// Seconds the tracker wants us to wait before announcing again
+    pub interval: Option<u32>,
     _min_interval: Option<u32>,
     _tracker_id: Option<String>,
     _complete: Option<u32>,
@@ -139,7 +140,7 @@ impl HTTPResponse for TrackerResponse {
                 failure: None,
                 success: Some(TrackerResponseGood {
                     _warning_message: take_str(&mut map, "warning message"),
-                    _interval: take_u32(&mut map, "interval").unwrap_or(0),
+                    interval: take_u32(&mut map, "interval"),
                     _min_interval: take_u32(&mut map, "min interval"),
                     _tracker_id: take_str(&mut map, "tracker id"),
                     _complete: take_u32(&mut map, "complete"),

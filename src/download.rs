@@ -19,7 +19,14 @@ use crate::{
 };
 
 const PEER_RETRY_DELAY: Duration = Duration::from_secs(30);
+/// Wait after a failed announce, or after one whose response had no usable interval
 const TRACKER_RETRY_DELAY: Duration = Duration::from_secs(60);
+
+/// When a tracker may next be announced to, and whether its last announce failed
+struct TrackerState {
+    next_announce: Instant,
+    failing: bool,
+}
 
 pub fn download_torrent_from_path(
     path: impl AsRef<Path>,
@@ -55,7 +62,7 @@ pub fn download_torrent(torrent: Torrent, no_seed: bool, cancel: &CancellationTo
 
     let torrent = Arc::new(torrent);
     let mut last_attempt: HashMap<Peer, Instant> = HashMap::new();
-    let mut failed_trackers: HashMap<String, Instant> = HashMap::new();
+    let mut trackers: HashMap<String, TrackerState> = HashMap::new();
 
     let mut peer_threads = Vec::new();
     let mut download_finished = false;
@@ -95,7 +102,7 @@ pub fn download_torrent(torrent: Torrent, no_seed: bool, cancel: &CancellationTo
         }
 
         if connected_peers < 100 {
-            let peers = get_peers_from_torrent(&torrent, &mut failed_trackers)
+            let peers = get_peers_from_torrent(&torrent, &mut trackers)
                 .expect("Failed to get peers from torrent");
             // Skip peers tried recently, otherwise a peer that refuses connections
             // (like our own announced address) gets retried every second
@@ -178,7 +185,7 @@ pub fn download_torrent(torrent: Torrent, no_seed: bool, cancel: &CancellationTo
 
 fn get_peers_from_torrent(
     torrent: &Torrent,
-    failed_trackers: &mut HashMap<String, Instant>,
+    trackers: &mut HashMap<String, TrackerState>,
 ) -> Result<Vec<Peer>, String> {
     let http_trackers = torrent
         .trackers
@@ -208,51 +215,53 @@ fn get_peers_from_torrent(
     }
 
     let now = Instant::now();
-    Ok(http_trackers
-        .into_iter()
-        .filter(|tracker| {
-            failed_trackers
-                .get(tracker)
-                .is_none_or(|t| now.duration_since(*t) >= TRACKER_RETRY_DELAY)
-        })
-        .collect::<Vec<_>>()
-        .into_iter()
-        .flat_map(|tracker| {
-            let response = match get_peers_http(torrent, &tracker) {
-                Ok(res) => {
-                    failed_trackers.remove(&tracker);
-                    res
+    let mut peers = Vec::new();
+    for tracker in http_trackers {
+        // Announcing before the tracker's interval is up gets us banned by some trackers
+        let previous = trackers.get(&tracker);
+        if previous.is_some_and(|state| now < state.next_announce) {
+            continue;
+        }
+        let was_failing = previous.is_some_and(|state| state.failing);
+
+        let result =
+            get_peers_http(torrent, &tracker).and_then(|response| match response.failure {
+                Some(err) => Err(format!("Tracker failure reason: {err}")),
+                None => Ok(response.success.expect("No success response from tracker")),
+            });
+
+        let state = match result {
+            Ok(response) => {
+                if response.peers.is_empty() {
+                    println!("No peers available from tracker {tracker}");
                 }
-                Err(err) => {
-                    // Only report the first failure, not every retry
-                    if failed_trackers.insert(tracker.clone(), now).is_none() {
-                        println!("Error getting peers from tracker {tracker}: {err}");
-                    }
-                    return vec![];
+                peers.extend(response.peers);
+
+                // An interval of 0 would mean announcing on every loop iteration
+                let delay = response
+                    .interval
+                    .filter(|&secs| secs > 0)
+                    .map_or(TRACKER_RETRY_DELAY, |secs| Duration::from_secs(secs.into()));
+                TrackerState {
+                    next_announce: now + delay,
+                    failing: false,
                 }
-            };
-
-            // println!("Tracker Response: {:?}", response);
-
-            if let Some(err) = response.failure {
-                println!("Tracker failure reason: {err:?}");
-                return vec![];
             }
-
-            let response = response.success.expect("No success response from tracker");
-            // println!("Interval: {}", response.interval);
-            // println!("Leechers: {}", response.incomplete.unwrap_or(0));
-            // println!("Seeders: {}", response.complete.unwrap_or(0));
-            // println!("Peers: {}", response.peers.len());
-
-            if response.peers.is_empty() {
-                println!("No peers available from tracker");
-                return vec![];
+            Err(err) => {
+                // Only report the first failure, not every retry
+                if !was_failing {
+                    println!("Error getting peers from tracker {tracker}: {err}");
+                }
+                TrackerState {
+                    next_announce: now + TRACKER_RETRY_DELAY,
+                    failing: true,
+                }
             }
+        };
+        trackers.insert(tracker, state);
+    }
 
-            response.peers
-        })
-        .collect())
+    Ok(peers)
 }
 
 fn get_peers_dht(info_hash: &[u8; 20], trackers: &[String]) -> Result<Vec<Peer>, String> {
