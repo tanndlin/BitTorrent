@@ -8,6 +8,10 @@ use sha1::{Digest, Sha1};
 
 use crate::bencoding::torrent;
 
+/// Largest block a peer may request; the spec allows rejecting anything over 16 KiB
+/// but some clients ask for more, so allow up to 128 KiB
+const MAX_BLOCK_LENGTH: u32 = 128 * 1024;
+
 struct Target {
     file: File,
     start: u64,
@@ -166,19 +170,7 @@ impl Journal {
             }
 
             let data = &mut buffer[..(piece_end - piece_start) as usize];
-            for target in &mut self.targets[overlapping] {
-                let from = piece_start.max(target.start);
-                let to = piece_end.min(target.start + target.length);
-                if from >= to {
-                    continue;
-                }
-                target
-                    .file
-                    .seek(std::io::SeekFrom::Start(from - target.start))?;
-                target.file.read_exact(
-                    &mut data[(from - piece_start) as usize..(to - piece_start) as usize],
-                )?;
-            }
+            read_range(&mut self.targets, piece_start, data)?;
 
             let hash: [u8; 20] = Sha1::digest(&*data).into();
             let valid = piece_hashes.get(piece_index as usize) == Some(&hash);
@@ -214,6 +206,8 @@ impl Journal {
         for target in targets {
             let Target {
                 file,
+                start,
+                length,
                 tmp_path,
                 final_path,
                 renamed,
@@ -221,14 +215,55 @@ impl Journal {
             } = target;
             drop(file);
             if !renamed {
-                fs::rename(tmp_path, final_path)?;
+                fs::rename(&tmp_path, &final_path)?;
             }
+            // Keep a read-only handle so completed pieces can still be seeded
+            self.targets.push(Target {
+                file: File::open(&final_path)?,
+                start,
+                length,
+                tmp_path,
+                final_path,
+                renamed: true,
+                adopted: false,
+            });
         }
         fs::remove_file(&self.journal_path)?;
         self.completed = true;
 
         println!("File saved successfully!");
         Ok(())
+    }
+
+    /// Reads `length` bytes at offset `begin` within a piece that has been written
+    pub fn get_block(
+        &mut self,
+        piece_index: u32,
+        begin: u32,
+        length: u32,
+    ) -> std::io::Result<Vec<u8>> {
+        if !self.is_written(piece_index) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Piece {piece_index} has not been written"),
+            ));
+        }
+
+        let file_size = self.targets.last().map_or(0, |t| t.start + t.length);
+        let piece_start = piece_index as u64 * self.piece_size as u64;
+        let piece_length = (file_size - piece_start).min(self.piece_size as u64);
+        if length == 0 || length > MAX_BLOCK_LENGTH || begin as u64 + length as u64 > piece_length {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "Invalid block request: piece {piece_index}, begin {begin}, length {length}"
+                ),
+            ));
+        }
+
+        let mut data = vec![0u8; length as usize];
+        read_range(&mut self.targets, piece_start + begin as u64, &mut data)?;
+        Ok(data)
     }
 
     pub fn num_written_pieces(&self) -> u32 {
@@ -248,6 +283,27 @@ fn overlapping_targets(targets: &[Target], start: u64, end: u64) -> std::ops::Ra
     let first = targets.partition_point(|t| t.start + t.length <= start);
     let last = targets.partition_point(|t| t.start < end);
     first..last.max(first)
+}
+
+/// Fills `buf` with the torrent bytes starting at absolute offset `start`, reading
+/// across file boundaries
+fn read_range(targets: &mut [Target], start: u64, buf: &mut [u8]) -> std::io::Result<()> {
+    let end = start + buf.len() as u64;
+    let overlapping = overlapping_targets(targets, start, end);
+    for target in &mut targets[overlapping] {
+        let from = start.max(target.start);
+        let to = end.min(target.start + target.length);
+        if from >= to {
+            continue;
+        }
+        target
+            .file
+            .seek(std::io::SeekFrom::Start(from - target.start))?;
+        target
+            .file
+            .read_exact(&mut buf[(from - start) as usize..(to - start) as usize])?;
+    }
+    Ok(())
 }
 
 fn safe_path(root: &str, components: &[String]) -> std::io::Result<PathBuf> {
@@ -299,7 +355,12 @@ fn open_target(
         if let Some(parent) = final_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let new_file = File::create(&tmp_path)?;
+        let new_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp_path)?;
         new_file.set_len(length)?;
         (new_file, false, false)
     };

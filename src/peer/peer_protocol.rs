@@ -86,10 +86,11 @@ pub fn connect_to_peer(
             handle_message(
                 &message,
                 &mut peer_state,
+                &mut peer_message_stream,
                 progress.clone(),
                 num_completed_pieces.clone(),
                 &mut tx,
-            );
+            )?;
         };
 
         // Once everything is downloaded, only answer the peer (seeding)
@@ -229,16 +230,23 @@ fn handle_handshake(
             PeerProtocolError::HandshakeError("Failed to send bitfield message".to_string())
         })?;
 
+    peer_message_stream
+        .write_all(&Vec::from(PeerMessage::create_unchoke()))
+        .map_err(|_| {
+            PeerProtocolError::HandshakeError("Failed to send unchoke message".to_string())
+        })?;
+
     Ok(peer_state)
 }
 
 fn handle_message(
     message: &PeerMessage,
     peer_state: &mut PeerState,
+    peer_message_stream: &mut PeerMessageStream,
     progress: Arc<RwLock<TorrentProgress>>,
     completed_pieces: Arc<AtomicU64>,
     tx: &mut Sender<Option<(u32, Vec<u8>)>>,
-) {
+) -> Result<(), PeerProtocolError> {
     // println!("Message ID: {:?}, Length: {}", message.id, message.length);
 
     match message.id {
@@ -280,10 +288,18 @@ fn handle_message(
             let index = u32::from_be_bytes(message.payload[0..4].try_into().unwrap());
             let begin = u32::from_be_bytes(message.payload[4..8].try_into().unwrap());
             let length = u32::from_be_bytes(message.payload[8..12].try_into().unwrap());
-            println!(
-                "Peer requested piece index: {}, begin: {}, length: {}",
-                index, begin, length
-            );
+            // println!(
+            //     "Peer requested piece index: {}, begin: {}, length: {}",
+            //     index, begin, length
+            // );
+
+            let block = progress.read().unwrap().get_block(index, begin, length);
+            match block {
+                Ok(data) => peer_message_stream
+                    .write_all(&Vec::from(PeerMessage::create_piece(index, begin, &data)))
+                    .map_err(|_| PeerProtocolError::ConnectionClosed)?,
+                Err(e) => println!("{} - Ignoring request: {e}", peer_state.peer),
+            }
         }
         PeerMessageID::Piece => {
             let index = u32::from_be_bytes(message.payload[0..4].try_into().unwrap());
@@ -370,6 +386,7 @@ fn handle_message(
             // println!("Decoded extension message: {:?}", dictionary);
         }
     }
+    Ok(())
 }
 
 fn bitfield_contains_piece(bitfield: &[u8], piece_index: u32) -> bool {

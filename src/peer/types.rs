@@ -90,6 +90,14 @@ impl From<PeerMessage> for Vec<u8> {
 }
 
 impl PeerMessage {
+    pub fn create_piece(index: u32, begin: u32, block: &[u8]) -> Self {
+        let mut payload = Vec::with_capacity(8 + block.len());
+        payload.extend_from_slice(&index.to_be_bytes());
+        payload.extend_from_slice(&begin.to_be_bytes());
+        payload.extend_from_slice(block);
+        Self::with_payload(PeerMessageID::Piece, payload)
+    }
+
     pub fn create_request(index: u32, begin: u32, length: u32) -> Self {
         let mut payload = Vec::<u8>::new();
         payload.extend_from_slice(&index.to_be_bytes());
@@ -107,6 +115,23 @@ impl PeerMessage {
             id: PeerMessageID::Interested,
             length: 1,
             payload: vec![],
+        }
+    }
+
+    pub fn create_unchoke() -> Self {
+        PeerMessage {
+            id: PeerMessageID::Unchoke,
+            length: 1,
+            payload: vec![],
+        }
+    }
+
+    pub fn with_payload(id: PeerMessageID, payload: Vec<u8>) -> Self {
+        Self {
+            id,
+            // The length prefix counts the ID byte as well as the payload
+            length: payload.len() as u32 + 1,
+            payload,
         }
     }
 }
@@ -174,6 +199,10 @@ impl TorrentProgress {
 }
 
 impl TorrentProgress {
+    pub fn get_block(&self, index: u32, begin: u32, length: u32) -> std::io::Result<Vec<u8>> {
+        self.journal.lock().unwrap().get_block(index, begin, length)
+    }
+
     pub fn num_written_pieces(&self) -> u32 {
         self.journal.lock().unwrap().num_written_pieces()
     }
