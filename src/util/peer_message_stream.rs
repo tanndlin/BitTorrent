@@ -1,31 +1,53 @@
-use std::{collections::VecDeque, net::TcpStream, time::Duration};
+use std::{collections::VecDeque, io::Read, net::TcpStream, time::Duration};
 
-use crate::{
-    peer::{PeerMessage, PeerMessageID, PeerProtocolError, WireBytes},
-    util::greedy_tcp_stream::GreedyTcpStream,
-};
+use crate::peer::{PeerMessage, PeerMessageID, PeerProtocolError, WireBytes};
 
 pub struct PeerMessageStream {
-    pub stream: GreedyTcpStream<PeerMessage>,
+    stream: TcpStream,
+    bytes_left: VecDeque<u8>,
+    buf: Box<[u8; 32768]>,
 }
 
 impl PeerMessageStream {
     pub fn new(stream: TcpStream) -> Self {
         Self {
-            stream: GreedyTcpStream::new(stream, parse_next_peer_message),
+            stream,
+            bytes_left: VecDeque::new(),
+            buf: Box::new([0u8; 32768]),
         }
     }
 
     pub fn write_all(&mut self, msg: &impl WireBytes) -> std::io::Result<()> {
-        msg.write_to(&mut self.stream.stream)
+        msg.write_to(&mut self.stream)
+    }
+
+    pub fn read_exact(&mut self, buf: &mut [u8]) -> std::io::Result<()> {
+        self.stream.read_exact(buf)
     }
 
     pub fn set_read_timeout(&self, dur: Duration) -> std::io::Result<()> {
-        self.stream.stream.set_read_timeout(Some(dur))
+        self.stream.set_read_timeout(Some(dur))
     }
 
     pub fn try_read_message(&mut self) -> Result<Option<PeerMessage>, PeerProtocolError> {
-        self.stream.try_read_message()
+        if let Some(message) = parse_next_peer_message(&mut self.bytes_left) {
+            return Ok(Some(message));
+        }
+
+        match self.stream.read(&mut *self.buf) {
+            Ok(0) => Err(PeerProtocolError::ConnectionClosed),
+            Ok(n) => {
+                self.bytes_left.extend(&self.buf[..n]);
+                Ok(parse_next_peer_message(&mut self.bytes_left))
+            }
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                Ok(None)
+            }
+            Err(_) => Err(PeerProtocolError::ConnectionClosed),
+        }
     }
 }
 

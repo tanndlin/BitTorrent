@@ -10,7 +10,6 @@ use crate::{
 };
 use std::{
     fmt::Display,
-    io::Read,
     net::{SocketAddr, TcpStream},
     sync::{
         atomic::{AtomicU64, Ordering::SeqCst},
@@ -191,8 +190,6 @@ fn handle_handshake(
         })?;
     let mut response_buf = [0; 68];
     peer_message_stream
-        .stream
-        .stream
         .read_exact(&mut response_buf)
         .map_err(|e| {
             PeerProtocolError::HandshakeError(format!("Failed to read handshake response: {}", e))
