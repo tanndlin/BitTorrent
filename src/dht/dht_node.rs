@@ -72,9 +72,8 @@ impl DhtClient {
                 match pending.remove(&transaction_id) {
                     Some(KRPCRequest::Ping(_)) if matches!(res, KRPCResponse::Ping(_)) => {}
                     Some(KRPCRequest::GetPeers(_)) if matches!(res, KRPCResponse::GetPeers(_)) => {
-                        let res = match res {
-                            KRPCResponse::GetPeers(gp) => gp,
-                            _ => unreachable!(),
+                        let KRPCResponse::GetPeers(res) = res else {
+                            unreachable!()
                         };
 
                         if let Some(peer_list) = res.peers {

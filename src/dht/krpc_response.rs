@@ -89,19 +89,17 @@ impl TryFrom<&HashMap<String, Value>> for KRPCResponsePing {
             Some(Value::Bytes(b)) if b.len() == 2 => [b[0], b[1]],
             _ => return Err("Missing or invalid transaction ID".to_string()),
         };
-        let node_id = match dict.get("r").and_then(|r| match r {
-            Value::Dict(d) => d.get("id").and_then(|id| match id {
-                Value::Bytes(b) if b.len() == 20 => {
-                    let id: [u8; 20] = b.as_slice().try_into().unwrap();
-                    Some(id)
-                }
+        let node_id: [u8; 20] = dict
+            .get("r")
+            .and_then(|r| match r {
+                Value::Dict(d) => d.get("id"),
                 _ => None,
-            }),
-            _ => None,
-        }) {
-            Some(id) => id,
-            None => return Err("Missing or invalid node ID in response".to_string()),
-        };
+            })
+            .and_then(|id| match id {
+                Value::Bytes(b) => b.as_slice().try_into().ok(),
+                _ => None,
+            })
+            .ok_or("Missing or invalid node ID in response")?;
         Ok(KRPCResponsePing {
             transaction_id,
             node_id,
@@ -118,9 +116,8 @@ impl TryFrom<&HashMap<String, Value>> for KRPCResponseFindNode {
             _ => return Err("Missing or invalid transaction ID".to_string()),
         };
 
-        let res = match dict.get("r") {
-            Some(Value::Dict(d)) => d,
-            _ => return Err("Missing or invalid 'r' dictionary in response".to_string()),
+        let Some(Value::Dict(res)) = dict.get("r") else {
+            return Err("Missing or invalid 'r' dictionary in response".to_string());
         };
 
         let node_id = match res.get("id") {
@@ -181,9 +178,8 @@ impl TryFrom<&HashMap<String, Value>> for KRPCResponseGetPeers {
             _ => return Err("Missing or invalid transaction ID".to_string()),
         };
 
-        let res = match dict.get("r") {
-            Some(Value::Dict(d)) => d,
-            _ => return Err("Missing or invalid 'r' dictionary in response".to_string()),
+        let Some(Value::Dict(res)) = dict.get("r") else {
+            return Err("Missing or invalid 'r' dictionary in response".to_string());
         };
 
         let node_id = match res.get("id") {
@@ -291,18 +287,13 @@ impl TryFrom<&HashMap<String, Value>> for KRPCError {
             _ => return Err("Missing or invalid 'e' list in KRPC error response".to_string()),
         };
 
-        let error_message = match dict.get("e").and_then(|e| match e {
-            Value::List(l) if l.len() == 2 => match &l[1] {
-                Value::Str(s) => Some(s.clone()),
-                _ => None,
-            },
-            _ => None,
-        }) {
-            Some(msg) => msg,
-            None => {
-                return Err("Missing or invalid error message in KRPC error response".to_string())
-            }
+        let Some(Value::List(l)) = dict.get("e") else {
+            return Err("Missing or invalid 'e' list in KRPC error response".to_string());
         };
+        let Some(Value::Str(error_message)) = l.get(1) else {
+            return Err("Missing or invalid error message in KRPC error response".to_string());
+        };
+        let error_message = error_message.clone();
 
         Ok(KRPCError {
             transaction_id,

@@ -6,9 +6,8 @@ use crate::bencoding::torrent::{self, File, Info, Torrent, Tracker};
 
 pub fn parse_metainfo(content: &[u8]) -> Torrent {
     let parsed = decode_dictionary(content, &mut 0).unwrap();
-    let dict = match parsed {
-        Value::Dict(map) => map,
-        _ => panic!("metainfo is not a dictionary"),
+    let Value::Dict(dict) = parsed else {
+        panic!("metainfo is not a dictionary");
     };
     // print_map(&dict);
 
