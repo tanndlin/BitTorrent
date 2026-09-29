@@ -28,3 +28,16 @@ ctrlc = "3.5.2"
 [profile.profiling]
 inherits = "release"
 debug = true
+
+[lints]
+workspace = true
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+cast_lossless = "allow"
+cast_sign_loss = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+cast_possible_truncation = "allow"
+implicit_hasher = "allow"
