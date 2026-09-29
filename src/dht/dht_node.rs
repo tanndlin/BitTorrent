@@ -18,6 +18,8 @@ pub struct DhtClient {
     socket: UdpSocket,
     node_id: [u8; 20],
     pub nodes: Vec<DhtNode>,
+    /// Reused across `recv_response` calls; sized for the largest possible UDP datagram
+    recv_buf: Box<[u8]>,
 }
 
 impl DhtClient {
@@ -47,10 +49,11 @@ impl DhtClient {
             socket,
             node_id,
             nodes,
+            recv_buf: vec![0u8; 65536].into_boxed_slice(),
         }
     }
 
-    pub fn get_peers(&self, info_hash: &[u8; 20]) -> Result<Vec<Peer>, String> {
+    pub fn get_peers(&mut self, info_hash: &[u8; 20]) -> Result<Vec<Peer>, String> {
         println!(
             "Starting DHT peer discovery for info_hash: {}",
             hex::encode(info_hash)
@@ -147,7 +150,7 @@ impl DhtClient {
     }
 
     #[allow(dead_code)]
-    fn send_ping(&self, node: &DhtNode) -> Result<(), String> {
+    fn send_ping(&mut self, node: &DhtNode) -> Result<(), String> {
         let ping_request = KRPCRequestPing::new(self.node_id);
         let encoded: Vec<u8> = ping_request.into();
 
@@ -169,11 +172,10 @@ impl DhtClient {
         }
     }
 
-    pub fn recv_response(&self) -> Option<KRPCResponse> {
-        let mut buf = [0u8; 65536];
+    pub fn recv_response(&mut self) -> Option<KRPCResponse> {
         loop {
-            match self.socket.recv_from(&mut buf) {
-                Ok((size, src)) => match KRPCResponse::try_from(&buf[..size]) {
+            match self.socket.recv_from(&mut self.recv_buf) {
+                Ok((size, src)) => match KRPCResponse::try_from(&self.recv_buf[..size]) {
                     Ok(res) => return Some(res),
                     Err(err) => {
                         println!("Failed to parse from {src}: {err}");

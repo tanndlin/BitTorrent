@@ -5,7 +5,7 @@ use crate::peer::{PeerMessage, PeerMessageID, PeerProtocolError, WireBytes};
 pub struct PeerMessageStream {
     stream: TcpStream,
     bytes_left: VecDeque<u8>,
-    buf: Box<[u8; 32768]>,
+    buf: Box<[u8]>,
 }
 
 impl PeerMessageStream {
@@ -13,7 +13,7 @@ impl PeerMessageStream {
         Self {
             stream,
             bytes_left: VecDeque::new(),
-            buf: Box::new([0u8; 32768]),
+            buf: vec![0u8; 32768].into_boxed_slice(),
         }
     }
 
@@ -34,7 +34,7 @@ impl PeerMessageStream {
             return Ok(Some(message));
         }
 
-        match self.stream.read(&mut *self.buf) {
+        match self.stream.read(&mut self.buf) {
             Ok(0) => Err(PeerProtocolError::ConnectionClosed),
             Ok(n) => {
                 self.bytes_left.extend(&self.buf[..n]);
