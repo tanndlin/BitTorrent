@@ -119,7 +119,6 @@ impl DhtClient {
                     }
                     Err(_err) => {
                         // println!("Error querying node {}: {}", node.location, err);
-                        continue;
                     }
                 }
             }

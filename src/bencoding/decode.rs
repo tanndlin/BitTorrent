@@ -368,22 +368,21 @@ pub fn get_info_hash(content: &[u8], start: usize) -> Result<[u8; 20], String> {
 
                 hasher.update(&content[start..end]);
                 return Ok(hasher.finalize().into());
-            } else {
-                // Skip this dictionary entry
-                return get_info_hash(content, index);
             }
-        } else {
-            let next = parse_next(content, &mut index)?;
-            dbg!(&next);
-            if let Value::Str(value) = next {
-                if value == "info" {
-                    let start = index;
-                    let mut hasher = Sha1::new();
-                    decode_dictionary(content, &mut index)?; // parse to move the index forward
-                    let end = index; // end of the "info" dictionary
-                    hasher.update(&content[start..end]);
-                    return Ok(hasher.finalize().into());
-                }
+            // Skip this dictionary entry
+            return get_info_hash(content, index);
+        }
+
+        let next = parse_next(content, &mut index)?;
+        dbg!(&next);
+        if let Value::Str(value) = next {
+            if value == "info" {
+                let start = index;
+                let mut hasher = Sha1::new();
+                decode_dictionary(content, &mut index)?; // parse to move the index forward
+                let end = index; // end of the "info" dictionary
+                hasher.update(&content[start..end]);
+                return Ok(hasher.finalize().into());
             }
         }
     }
