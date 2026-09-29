@@ -4,6 +4,8 @@ use std::{
     path::PathBuf,
 };
 
+use sha1::{Digest, Sha1};
+
 use crate::bencoding::torrent;
 
 struct Target {
@@ -13,6 +15,8 @@ struct Target {
     tmp_path: PathBuf,
     final_path: PathBuf,
     renamed: bool,
+    /// Opened from a final file that already existed, so its contents are unverified
+    adopted: bool,
 }
 
 pub struct Journal {
@@ -32,6 +36,7 @@ impl Journal {
         file_size: usize,
         piece_size: usize,
         files: Vec<torrent::File>,
+        piece_hashes: &[[u8; 20]],
     ) -> std::io::Result<Self> {
         let total_pieces = file_size.div_ceil(piece_size);
 
@@ -86,6 +91,12 @@ impl Journal {
             completed: false,
         };
 
+        // Files that already exist (e.g. from another client) aren't covered by the
+        // journal, so hash their pieces to find out what we already have
+        if !all_written && journal.targets.iter().any(|t| t.adopted) {
+            journal.verify_adopted_pieces(piece_hashes)?;
+        }
+
         // A previous run may have written every piece without finalizing
         if journal.num_pieces_written == journal.total_pieces {
             journal.finalize()?;
@@ -109,20 +120,16 @@ impl Journal {
 
         let piece_start = piece_index as u64 * self.piece_size as u64;
         let piece_end = piece_start + data.len() as u64;
-        let first = self
-            .targets
-            .partition_point(|t| t.start + t.length <= piece_start);
-
-        for target in &mut self.targets[first..] {
-            if target.start >= piece_end {
-                break;
-            }
+        let overlapping = overlapping_targets(&self.targets, piece_start, piece_end);
+        for target in &mut self.targets[overlapping] {
             let from = piece_start.max(target.start);
             let to = piece_end.min(target.start + target.length);
             if from >= to {
                 continue;
             }
-            target.file.seek(std::io::SeekFrom::Start(from - target.start))?;
+            target
+                .file
+                .seek(std::io::SeekFrom::Start(from - target.start))?;
             target
                 .file
                 .write_all(&data[(from - piece_start) as usize..(to - piece_start) as usize])?;
@@ -139,6 +146,59 @@ impl Journal {
             self.finalize()?;
         }
 
+        Ok(())
+    }
+
+    /// Rehashes every piece that overlaps an adopted file and records whether it matches
+    fn verify_adopted_pieces(&mut self, piece_hashes: &[[u8; 20]]) -> std::io::Result<()> {
+        let file_size = self.targets.last().map_or(0, |t| t.start + t.length);
+        let mut buffer = vec![0u8; self.piece_size];
+        let mut verified = 0;
+        let mut checked = 0;
+
+        println!("Verifying existing files...");
+        for piece_index in 0..self.total_pieces {
+            let piece_start = piece_index as u64 * self.piece_size as u64;
+            let piece_end = (piece_start + self.piece_size as u64).min(file_size);
+            let overlapping = overlapping_targets(&self.targets, piece_start, piece_end);
+            if !self.targets[overlapping.clone()].iter().any(|t| t.adopted) {
+                continue;
+            }
+
+            let data = &mut buffer[..(piece_end - piece_start) as usize];
+            for target in &mut self.targets[overlapping] {
+                let from = piece_start.max(target.start);
+                let to = piece_end.min(target.start + target.length);
+                if from >= to {
+                    continue;
+                }
+                target
+                    .file
+                    .seek(std::io::SeekFrom::Start(from - target.start))?;
+                target.file.read_exact(
+                    &mut data[(from - piece_start) as usize..(to - piece_start) as usize],
+                )?;
+            }
+
+            let hash: [u8; 20] = Sha1::digest(&*data).into();
+            let valid = piece_hashes.get(piece_index as usize) == Some(&hash);
+            let was_written =
+                std::mem::replace(&mut self.pieces_written[piece_index as usize], valid);
+            match (was_written, valid) {
+                (false, true) => self.num_pieces_written += 1,
+                (true, false) => self.num_pieces_written -= 1,
+                _ => {}
+            }
+            checked += 1;
+            verified += valid as u32;
+        }
+        println!("Verified {verified}/{checked} pieces from existing files");
+
+        if let Some(journal_file) = &mut self.journal_file {
+            let bytes: Vec<u8> = self.pieces_written.iter().map(|&w| w as u8).collect();
+            journal_file.seek(std::io::SeekFrom::Start(0))?;
+            journal_file.write_all(&bytes)?;
+        }
         Ok(())
     }
 
@@ -183,6 +243,13 @@ impl Journal {
     }
 }
 
+/// Range of target indices whose byte span intersects `[start, end)`
+fn overlapping_targets(targets: &[Target], start: u64, end: u64) -> std::ops::Range<usize> {
+    let first = targets.partition_point(|t| t.start + t.length <= start);
+    let last = targets.partition_point(|t| t.start < end);
+    first..last.max(first)
+}
+
 fn safe_path(root: &str, components: &[String]) -> std::io::Result<PathBuf> {
     let mut path = PathBuf::from(root);
     for component in components {
@@ -211,17 +278,30 @@ fn open_target(
     tmp_path.push(".tmp");
     let tmp_path = PathBuf::from(tmp_path);
 
-    let (file, renamed) = if tmp_path.exists() {
-        (OpenOptions::new().read(true).write(true).open(&tmp_path)?, false)
+    let final_len = fs::metadata(&final_path).ok().map(|m| m.len());
+    let (file, renamed, adopted) = if tmp_path.exists() {
+        let file = OpenOptions::new().read(true).write(true).open(&tmp_path)?;
+        (file, false, false)
     } else if all_written && final_path.exists() {
-        (OpenOptions::new().read(true).write(true).open(&final_path)?, true)
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&final_path)?;
+        (file, true, false)
+    } else if final_len == Some(length) {
+        // Write into the existing file in place; its pieces get verified by hash
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&final_path)?;
+        (file, true, true)
     } else {
         if let Some(parent) = final_path.parent() {
             fs::create_dir_all(parent)?;
         }
         let new_file = File::create(&tmp_path)?;
         new_file.set_len(length)?;
-        (new_file, false)
+        (new_file, false, false)
     };
 
     if file.metadata()?.len() != length {
@@ -241,6 +321,7 @@ fn open_target(
         tmp_path,
         final_path,
         renamed,
+        adopted,
     })
 }
 

@@ -14,17 +14,24 @@ use crate::{
     connection::{Event, HTTPResponse, Peer, TrackerRequest, TrackerResponse},
     dht::dht_node::DhtClient,
     peer::{connect_to_peer, PeerProtocolError, TorrentProgress},
+    util::CancellationToken,
 };
 
 const PEER_RETRY_DELAY: Duration = Duration::from_secs(30);
 const TRACKER_RETRY_DELAY: Duration = Duration::from_secs(60);
 
-pub fn download_torrent_from_path(path: &str) {
+pub fn download_torrent_from_path(path: &str, no_seed: bool, cancel: CancellationToken) {
     let torrent = Torrent::read(path).unwrap();
-    download_torrent(torrent, Arc::new(AtomicU64::new(0)));
+    download_torrent(torrent, Arc::new(AtomicU64::new(0)), no_seed, cancel);
 }
 
-pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
+/// Downloads the torrent, then seeds until `cancel` is cancelled (unless `no_seed`)
+pub fn download_torrent(
+    torrent: Torrent,
+    completed_pieces: Arc<AtomicU64>,
+    no_seed: bool,
+    cancel: CancellationToken,
+) {
     dbg!(&torrent.trackers);
 
     let start_time = std::time::Instant::now();
@@ -48,23 +55,41 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
     let mut last_attempt: HashMap<Peer, Instant> = HashMap::new();
     let mut failed_trackers: HashMap<String, Instant> = HashMap::new();
 
+    let mut peer_threads = Vec::new();
+    let mut download_finished = false;
+
     println!();
 
-    // Every second, print progress until all pieces are complete
-    loop {
+    // Print progress and top up peers until cancelled, or until the download
+    // finishes when not seeding
+    while !cancel.is_cancelled() {
         let completed = completed_pieces.load(SeqCst);
         let percent = (completed as f64 / total_pieces as f64) * 100.0;
         let connected_peers = progress.read().unwrap().connected_peers.len();
         print!(
-            "\rProgress - {}/{} peices ({:.2}%) - Connected Peers: {}",
-            completed, total_pieces, percent, connected_peers
+            "\r{} - {}/{} peices ({:.2}%) - Connected Peers: {}",
+            if download_finished {
+                "Seeding"
+            } else {
+                "Progress"
+            },
+            completed,
+            total_pieces,
+            percent,
+            connected_peers
         );
         std::io::stdout().flush().unwrap();
 
-        // Check if all pieces are complete
-        if completed >= total_pieces {
-            println!();
-            break;
+        if !download_finished && completed >= total_pieces {
+            download_finished = true;
+            println!(
+                "\nDownload complete! Time taken: {:.2?}",
+                start_time.elapsed()
+            );
+
+            if no_seed {
+                break;
+            }
         }
 
         if connected_peers < 100 {
@@ -106,13 +131,15 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
                     let torrent = Arc::clone(&torrent);
                     let completed_pieces = Arc::clone(&completed_pieces);
                     let tx = tx.clone();
-                    thread::spawn(move || {
+                    let cancel = cancel.clone();
+                    peer_threads.push(thread::spawn(move || {
                         match connect_to_peer(
                             &peer,
                             &torrent,
                             progress.clone(),
                             completed_pieces.clone(),
                             tx,
+                            &cancel,
                         ) {
                             Ok(_) => {}
                             Err(err) => match err {
@@ -123,22 +150,22 @@ pub fn download_torrent(torrent: Torrent, completed_pieces: Arc<AtomicU64>) {
 
                         // Delete peer from list
                         progress.write().unwrap().connected_peers.remove(&peer);
-                    });
+                    }));
                 }
             }
         }
 
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        peer_threads.retain(|handle| !handle.is_finished());
+        cancel.wait_timeout(Duration::from_millis(50));
     }
 
-    // Peer threads aren't joined: every piece is already in `progress`, and a peer
-    // thread stuck on a slow or dead connection shouldn't hold up saving the file
-    let end_time = std::time::Instant::now();
-
-    println!(
-        "Download complete! Time taken: {:.2?}",
-        end_time.duration_since(start_time)
-    );
+    // Stop peer threads and wait for them, so none is mid-piece when the writer
+    // thread shuts down. Each notices within one read timeout
+    println!("\nShutting down {} peer connections", peer_threads.len());
+    cancel.cancel();
+    for handle in peer_threads {
+        let _ = handle.join();
+    }
 
     tx.send(None).unwrap();
     let writer_thread = progress.write().unwrap().writer_thread.take();

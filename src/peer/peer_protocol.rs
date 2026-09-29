@@ -6,7 +6,7 @@ use crate::{
     peer::types::{
         PeerHandshake, PeerMessage, PeerMessageID, PeerState, PieceProgress, TorrentProgress,
     },
-    util::peer_message_stream::PeerMessageStream,
+    util::{peer_message_stream::PeerMessageStream, CancellationToken},
 };
 use std::{
     fmt::Display,
@@ -50,6 +50,7 @@ pub fn connect_to_peer(
     progress: Arc<RwLock<TorrentProgress>>,
     num_completed_pieces: Arc<AtomicU64>,
     mut tx: Sender<Option<(u32, Vec<u8>)>>,
+    cancel: &CancellationToken,
 ) -> Result<(), PeerProtocolError> {
     let stream = TcpStream::connect_timeout(&SocketAddr::new(peer.ip, peer.port), IO_TIMEOUT)
         .map_err(|_| PeerProtocolError::FailedToConnect)?;
@@ -80,8 +81,7 @@ pub fn connect_to_peer(
         .map_err(|_| PeerProtocolError::ConnectionClosed)?;
 
     let mut rand = rand::rng();
-
-    while num_completed_pieces.load(SeqCst) < torrent.info.pieces.len() as u64 {
+    while !cancel.is_cancelled() {
         if let Some(message) = peer_message_stream.try_read_message()? {
             handle_message(
                 &message,
@@ -92,74 +92,77 @@ pub fn connect_to_peer(
             );
         };
 
-        if peer_state.bitfield.is_empty() || peer_state.is_choked {
-            continue;
-        }
-
-        // Choose 5 random pieces that the peer has and that we don't have
-        {
-            let progress = progress.read().unwrap();
-            // Remove the piece from requested pieces if another peer already completed it
-            peer_state
-                .requested_pieces
-                .retain(|piece_index| progress.needed_pieces.contains(piece_index));
-
-            let missing = 5usize.saturating_sub(peer_state.requested_pieces.len());
-            if missing > 0 {
-                let new_pieces = progress
-                    .needed_pieces
-                    .iter()
-                    .copied()
-                    .filter(|&piece_index| {
-                        bitfield_contains_piece(&peer_state.bitfield, piece_index)
-                            && !peer_state.requested_pieces.contains(&piece_index)
-                    })
-                    .choose_multiple(&mut rand, missing);
-                peer_state.requested_pieces.extend(new_pieces);
+        // Once everything is downloaded, only answer the peer (seeding)
+        if num_completed_pieces.load(SeqCst) < torrent.info.pieces.len() as u64 {
+            if peer_state.bitfield.is_empty() || peer_state.is_choked {
+                continue;
             }
-        }
 
-        let mut request_bytes = vec![];
-        for piece_index in &peer_state.requested_pieces.clone() {
-            if let PieceProgress::InProgress(piece_progress) = &mut *progress.read().unwrap().pieces
-                [*piece_index as usize]
-                .lock()
-                .unwrap()
+            // Choose 5 random pieces that the peer has and that we don't have
             {
-                let mut start = 0;
-                let mut begin = 0;
-                while begin < torrent.get_piece_length(*piece_index as usize)
-                    && peer_state.inflight < MAX_INFLIGHT_REQUESTS
-                {
-                    // println!(
-                    //     "Requesting piece index: {}, begin: {}, length: {}",
-                    //     piece_index,
-                    //     start,
-                    //     16 * 1024
-                    // );
-                    let block_progress = piece_progress.data.get_mut(start as usize).unwrap();
-                    if block_progress.inflight || block_progress.complete {
-                        start += 1;
-                        begin += 16 * 1024;
-                        continue;
-                    }
+                let progress = progress.read().unwrap();
+                // Remove the piece from requested pieces if another peer already completed it
+                peer_state
+                    .requested_pieces
+                    .retain(|piece_index| progress.needed_pieces.contains(piece_index));
 
-                    PeerMessage::create_request(*piece_index, begin, block_progress.length)
-                        .encode_to(&mut request_bytes);
-
-                    // Mark block as inflight
-                    block_progress.inflight = true;
-
-                    peer_state.inflight += 1;
-                    start += 1;
-                    begin += 16 * 1024;
+                let missing = 5usize.saturating_sub(peer_state.requested_pieces.len());
+                if missing > 0 {
+                    let new_pieces = progress
+                        .needed_pieces
+                        .iter()
+                        .copied()
+                        .filter(|&piece_index| {
+                            bitfield_contains_piece(&peer_state.bitfield, piece_index)
+                                && !peer_state.requested_pieces.contains(&piece_index)
+                        })
+                        .choose_multiple(&mut rand, missing);
+                    peer_state.requested_pieces.extend(new_pieces);
                 }
             }
-        }
 
-        peer_message_stream
-            .write_all(&request_bytes)
-            .map_err(|_| PeerProtocolError::ConnectionClosed)?;
+            let mut request_bytes = vec![];
+            for piece_index in &peer_state.requested_pieces.clone() {
+                if let PieceProgress::InProgress(piece_progress) =
+                    &mut *progress.read().unwrap().pieces[*piece_index as usize]
+                        .lock()
+                        .unwrap()
+                {
+                    let mut start = 0;
+                    let mut begin = 0;
+                    while begin < torrent.get_piece_length(*piece_index as usize)
+                        && peer_state.inflight < MAX_INFLIGHT_REQUESTS
+                    {
+                        // println!(
+                        //     "Requesting piece index: {}, begin: {}, length: {}",
+                        //     piece_index,
+                        //     start,
+                        //     16 * 1024
+                        // );
+                        let block_progress = piece_progress.data.get_mut(start as usize).unwrap();
+                        if block_progress.inflight || block_progress.complete {
+                            start += 1;
+                            begin += 16 * 1024;
+                            continue;
+                        }
+
+                        PeerMessage::create_request(*piece_index, begin, block_progress.length)
+                            .encode_to(&mut request_bytes);
+
+                        // Mark block as inflight
+                        block_progress.inflight = true;
+
+                        peer_state.inflight += 1;
+                        start += 1;
+                        begin += 16 * 1024;
+                    }
+                }
+            }
+
+            peer_message_stream
+                .write_all(&request_bytes)
+                .map_err(|_| PeerProtocolError::ConnectionClosed)?;
+        }
     }
 
     // Close stream
@@ -277,10 +280,10 @@ fn handle_message(
             let index = u32::from_be_bytes(message.payload[0..4].try_into().unwrap());
             let begin = u32::from_be_bytes(message.payload[4..8].try_into().unwrap());
             let length = u32::from_be_bytes(message.payload[8..12].try_into().unwrap());
-            // println!(
-            //     "Peer requested piece index: {}, begin: {}, length: {}",
-            //     index, begin, length
-            // );
+            println!(
+                "Peer requested piece index: {}, begin: {}, length: {}",
+                index, begin, length
+            );
         }
         PeerMessageID::Piece => {
             let index = u32::from_be_bytes(message.payload[0..4].try_into().unwrap());
