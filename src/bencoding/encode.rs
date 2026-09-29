@@ -34,7 +34,7 @@ fn encode_torrent(torrent: &Torrent) -> Vec<u8> {
     if let Some(length) = torrent.info.length {
         info.insert("length".to_string(), Value::Number(length));
     } else {
-        let mut files = Vec::<Value>::new();
+        let mut files = vec![];
         for file in torrent
             .info
             .files
@@ -42,14 +42,10 @@ fn encode_torrent(torrent: &Torrent) -> Vec<u8> {
             .expect("Neither length nor files was present in metainfo")
         {
             let mut file_dict = HashMap::<String, Value>::new();
-            // let mut path = Vec::<Value>::new();
-            // for dir in file.path {
-            //     path.push(Value::Str(dir));
-            // }
             let path = file
                 .path
                 .iter()
-                .map(|dir| Value::Str(dir.to_string()))
+                .map(|dir| Value::Str(dir.clone()))
                 .collect();
 
             file_dict.insert("length".to_string(), Value::Number(file.length));
@@ -66,7 +62,7 @@ fn encode_torrent(torrent: &Torrent) -> Vec<u8> {
 
 pub fn encode_value(value: &Value) -> Vec<u8> {
     match value {
-        Value::Number(n) => encode_number(n),
+        Value::Number(n) => encode_number(*n),
         Value::Str(s) => encode_string(s),
         Value::Bytes(b) => encode_bytes(b),
         Value::Dict(dict) => encode_dictionary(dict),
@@ -81,7 +77,7 @@ pub fn encode_dictionary(dict: &HashMap<String, Value>) -> Vec<u8> {
     let mut ret = Vec::<u8>::new();
     ret.push(DICTIONARY_START);
 
-    for (key, value) in dict.iter() {
+    for (key, value) in dict {
         ret.extend_from_slice(&encode_string(key));
         ret.extend_from_slice(&encode_value(value));
     }
@@ -100,7 +96,7 @@ fn encode_list(l: &[Value]) -> Vec<u8> {
     ret
 }
 
-fn encode_number(number: &i64) -> Vec<u8> {
+fn encode_number(number: i64) -> Vec<u8> {
     let mut ret = Vec::<u8>::new();
     ret.push(INTEGER_START);
     ret.extend_from_slice(number.to_string().as_bytes());
