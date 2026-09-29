@@ -1408,6 +1408,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "torrent-info"
+version = "0.1.0"
+dependencies = [
+ "bittorrent",
+]
+
+[[package]]
 name = "tower"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

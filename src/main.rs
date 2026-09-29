@@ -1,14 +1,6 @@
-mod bencoding;
-mod connection;
-mod dht;
-mod download;
-mod peer;
-mod util;
-
+use bittorrent::download::download_torrent_from_path;
 use clap::Parser;
 use std::path::PathBuf;
-
-use crate::download::download_torrent_from_path;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]

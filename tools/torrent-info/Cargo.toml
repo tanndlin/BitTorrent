@@ -1,0 +1,8 @@
+[package]
+name = "torrent-info"
+version = "0.1.0"
+description = "Parse and print the contents of a .torrent file"
+edition = "2021"
+
+[dependencies]
+bittorrent = { path = "../.." }

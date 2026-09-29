@@ -3,6 +3,8 @@ FROM rust:latest AS builder
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
+# Workspace members must exist for cargo to resolve the workspace
+COPY tools ./tools
 
 # Build deps only using dummy src — this layer is cached until Cargo.toml/Cargo.lock changes
 RUN mkdir -p src && echo "fn main() {}" > src/main.rs
@@ -23,6 +25,8 @@ WORKDIR /app
 ENV RUSTFLAGS="-C force-frame-pointers=yes"
 
 COPY Cargo.toml Cargo.lock ./
+# Workspace members must exist for cargo to resolve the workspace
+COPY tools ./tools
 RUN mkdir -p src && echo "fn main() {}" > src/main.rs
 RUN cargo build --profile profiling --bin bittorrent
 RUN rm -rf src
