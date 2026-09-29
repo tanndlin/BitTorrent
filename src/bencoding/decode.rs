@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use crate::bencoding::torrent::{self, File, Info, Torrent, Tracker};
 
-pub fn parse_metainfo(content: &Vec<u8>) -> Torrent {
+pub fn parse_metainfo(content: &[u8]) -> Torrent {
     let parsed = decode_dictionary(content, &mut 0).unwrap();
     let dict = match parsed {
         Value::Dict(map) => map,
@@ -332,7 +332,7 @@ pub fn print_map(map: &HashMap<String, Value>) {
     }
 }
 
-fn print_list(list: &Vec<Value>) {
+fn print_list(list: &[Value]) {
     for value in list {
         match value {
             Value::Str(s) => print!("{s} "),
@@ -348,13 +348,13 @@ fn print_list(list: &Vec<Value>) {
     println!();
 }
 
-fn print_hashes(hashes: &Vec<[u8; 20]>) {
+fn print_hashes(hashes: &[[u8; 20]]) {
     for hash in hashes {
         print!("{:?} ", hash);
     }
 }
 
-pub fn get_info_hash(content: &Vec<u8>, start: usize) -> Result<[u8; 20], String> {
+pub fn get_info_hash(content: &[u8], start: usize) -> Result<[u8; 20], String> {
     let mut index = start;
 
     // Find the "info" dictionary
