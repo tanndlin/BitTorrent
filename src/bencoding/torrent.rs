@@ -2,6 +2,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::bencoding::decode;
+
 pub static DICTIONARY_START: u8 = b'd';
 pub static DICTIONARY_END: u8 = b'e';
 pub static INTEGER_START: u8 = b'i';
@@ -45,6 +47,12 @@ pub struct File {
 }
 
 impl Torrent {
+    pub fn read(path: &str) -> Result<Self, String> {
+        let content =
+            std::fs::read(path).map_err(|e| format!("Unable to read torrent file: {e}"))?;
+        Ok(decode::parse_metainfo(&content))
+    }
+
     pub fn total_length(&self) -> u64 {
         if let Some(length) = self.info.length {
             length as u64

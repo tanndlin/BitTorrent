@@ -10,10 +10,7 @@ use std::{
 };
 
 use crate::{
-    bencoding::{
-        decode,
-        torrent::{Torrent, Tracker},
-    },
+    bencoding::torrent::{Torrent, Tracker},
     connection::{Event, HTTPResponse, Peer, TrackerRequest, TrackerResponse},
     dht::dht_node::DhtClient,
     peer::{connect_to_peer, PeerProtocolError, TorrentProgress},
@@ -23,8 +20,7 @@ const PEER_RETRY_DELAY: Duration = Duration::from_secs(30);
 const TRACKER_RETRY_DELAY: Duration = Duration::from_secs(60);
 
 pub fn download_torrent_from_path(path: &str) {
-    let content = std::fs::read(path).expect("Failed to read file");
-    let torrent = decode::parse_metainfo(&content);
+    let torrent = Torrent::read(path).unwrap();
     download_torrent(torrent, Arc::new(AtomicU64::new(0)));
 }
 
