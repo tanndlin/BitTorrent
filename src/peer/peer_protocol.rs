@@ -202,7 +202,13 @@ fn handle_handshake(
             PeerProtocolError::HandshakeError(format!("Failed to read handshake response: {}", e))
         })?;
 
-    PeerHandshake::try_from(response_buf).map_err(PeerProtocolError::HandshakeError)?;
+    let handshake =
+        PeerHandshake::try_from(response_buf).map_err(PeerProtocolError::HandshakeError)?;
+    if handshake.info_hash != torrent.info_hash {
+        return Err(PeerProtocolError::HandshakeError(
+            "Received incorrect info_hash".to_string(),
+        ));
+    }
 
     let num_bitfield_bytes = torrent.info.pieces.len().div_ceil(8);
     let mut bitfield_payload = vec![0; num_bitfield_bytes];
