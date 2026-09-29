@@ -275,7 +275,7 @@ impl TryFrom<&HashMap<String, Value>> for KRPCError {
 
         let error_code = match dict.get("e") {
             Some(Value::List(l)) if l.len() == 2 => match &l[0] {
-                Value::Number(n) => match *n as u16 {
+                Value::Number(n) => match *n {
                     201 => KRPCErrorCode::GenericError,
                     202 => KRPCErrorCode::ServerError,
                     203 => KRPCErrorCode::ProtocolError,

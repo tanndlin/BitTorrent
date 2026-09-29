@@ -23,7 +23,7 @@ fn encode_torrent(torrent: &Torrent) -> Vec<u8> {
     info.insert("name".to_string(), Value::Str(torrent.info.name.clone()));
     info.insert(
         "piece length".to_string(),
-        Value::Number(torrent.info.piece_length as i64),
+        Value::Number(torrent.info.piece_length.cast_signed()),
     );
     info.insert(
         "pieces".to_string(),

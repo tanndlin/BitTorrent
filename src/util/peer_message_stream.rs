@@ -56,8 +56,8 @@ fn parse_next_peer_message(buf: &mut VecDeque<u8>) -> Option<PeerMessage> {
         return None;
     }
 
-    let length = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
-    if buf.len() < 4 + length {
+    let length = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    if buf.len() < 4 + length as usize {
         return None;
     }
 
@@ -88,11 +88,11 @@ fn parse_next_peer_message(buf: &mut VecDeque<u8>) -> Option<PeerMessage> {
             return None;
         }
     };
-    let payload = buf.make_contiguous()[5..4 + length].to_vec();
-    buf.drain(..4 + length);
+    let payload = buf.make_contiguous()[5..4 + length as usize].to_vec();
+    buf.drain(..4 + length as usize);
     Some(PeerMessage {
         id,
-        length: (length - 1) as u32,
+        length: (length - 1),
         payload,
     })
 }
