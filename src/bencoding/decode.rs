@@ -56,70 +56,66 @@ pub fn parse_metainfo(content: &[u8]) -> Torrent {
         info_hash.map(|b| format!("{b:02x}")).join("")
     );
 
+    let Some(Value::Dict(info_map)) = dict.get("info") else {
+        panic!("info is not a dictionary");
+    };
+
     Torrent {
         trackers,
         info_hash,
-        info: match &dict["info"] {
-            Value::Dict(info_map) => {
-                let name = match &info_map["name"] {
-                    Value::Str(s) => s.clone(),
-                    _ => panic!("info.name is not a string"),
-                };
-                let piece_length = match &info_map["piece length"] {
-                    Value::Number(n) => *n as u64,
-                    _ => panic!("info.piece length is not a number"),
-                };
-                let pieces = match &info_map["pieces"] {
-                    Value::Hashes(h) => h.clone(),
-                    _ => panic!("info.pieces is not a list of hashes"),
-                };
-                let length = match info_map.get("length") {
-                    Some(Value::Number(n)) => Some(*n),
-                    Some(_) => panic!("info.length is not a number"),
-                    None => None,
-                };
-                let files = match info_map.get("files") {
-                    Some(Value::List(l)) => {
-                        let mut file_list = Vec::new();
-                        for file_value in l {
-                            match file_value {
-                                Value::Dict(file_map) => {
-                                    let length = match &file_map["length"] {
-                                        Value::Number(n) => *n,
-                                        _ => panic!("file.length is not a number"),
-                                    };
-                                    let path = match &file_map["path"] {
-                                        Value::List(p) => p
-                                            .iter()
-                                            .map(|v| match v {
-                                                Value::Str(s) => s.clone(),
-                                                _ => panic!("file.path element is not a string"),
-                                            })
-                                            .collect(),
-                                        _ => panic!("file.path is not a list"),
-                                    };
-                                    file_list.push(File { length, path });
-                                }
-                                _ => panic!("file entry is not a dictionary"),
-                            }
-                        }
-                        Some(file_list)
-                    }
-                    Some(_) => panic!("info.files is not a list"),
-                    None => None,
-                };
-
-                Info {
-                    name,
-                    piece_length,
-                    pieces,
-                    length,
-                    files,
-                }
-            }
-            _ => panic!("info is not a dictionary"),
-        },
+        info: parse_info(info_map),
     }
+}
+
+fn parse_info(info_map: &HashMap<String, Value>) -> Info {
+    let Some(Value::Str(name)) = info_map.get("name") else {
+        panic!("info.name is not a string");
+    };
+    let Some(&Value::Number(piece_length)) = info_map.get("piece length") else {
+        panic!("info.piece length is not a number");
+    };
+    let Some(Value::Hashes(pieces)) = info_map.get("pieces") else {
+        panic!("info.pieces is not a list of hashes");
+    };
+    let length = match info_map.get("length") {
+        Some(&Value::Number(n)) => Some(n),
+        Some(_) => panic!("info.length is not a number"),
+        None => None,
+    };
+    let files = match info_map.get("files") {
+        Some(Value::List(l)) => Some(l.iter().map(parse_file).collect()),
+        Some(_) => panic!("info.files is not a list"),
+        None => None,
+    };
+
+    Info {
+        name: name.clone(),
+        piece_length: piece_length as u64,
+        pieces: pieces.clone(),
+        length,
+        files,
+    }
+}
+
+fn parse_file(value: &Value) -> File {
+    let Value::Dict(file_map) = value else {
+        panic!("file entry is not a dictionary");
+    };
+    let Some(&Value::Number(length)) = file_map.get("length") else {
+        panic!("file.length is not a number");
+    };
+    let Some(Value::List(path)) = file_map.get("path") else {
+        panic!("file.path is not a list");
+    };
+    let path = path
+        .iter()
+        .map(|v| match v {
+            Value::Str(s) => s.clone(),
+            _ => panic!("file.path element is not a string"),
+        })
+        .collect();
+
+    File { length, path }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
