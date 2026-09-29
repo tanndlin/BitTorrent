@@ -90,7 +90,7 @@ pub fn connect_to_peer(
                 num_completed_pieces,
                 &mut tx,
             )?;
-        };
+        }
 
         // Once everything is downloaded, only answer the peer (seeding)
         if num_completed_pieces.load(SeqCst) < torrent.info.pieces.len() as u64 {
@@ -357,13 +357,13 @@ fn handle_message(
             );
         }
         PeerMessageID::Port => {
-            let port = u16::from_be_bytes(message.payload[0..2].try_into().unwrap());
+            let _port = u16::from_be_bytes(message.payload[0..2].try_into().unwrap());
             // println!("Peer's DHT port: {}", port);
         }
         PeerMessageID::Extended => {
             // println!("Received extension message");
             let extension_id = message.payload[0];
-            let extension_id_str = match extension_id {
+            let _extension_id_str = match extension_id {
                 0 => "ut_metadata",
                 1 => "ut_pex",
                 2 => "ut_holepunch",

@@ -81,7 +81,7 @@ impl TrackerRequest {
             self.compact,
             self.no_peer_id as u8,
             self.event,
-            self.ip.map_or("".to_string(), |ip| ip.to_string()),
+            self.ip.map_or(String::new(), |ip| ip.to_string()),
             self.num_want.unwrap_or(-1),
             self.key.unwrap_or(0),
             self.tracker_id.as_deref().unwrap_or(""),
@@ -108,12 +108,12 @@ impl Display for TrackerResponseError {
 
 #[derive(Debug)]
 pub struct TrackerResponseGood {
-    pub _warning_message: Option<String>,
-    pub _interval: u32,
-    pub _min_interval: Option<u32>,
-    pub _tracker_id: Option<String>,
-    pub _complete: Option<u32>,
-    pub _incomplete: Option<u32>,
+    _warning_message: Option<String>,
+    _interval: u32,
+    _min_interval: Option<u32>,
+    _tracker_id: Option<String>,
+    _complete: Option<u32>,
+    _incomplete: Option<u32>,
     pub peers: Vec<Peer>,
 }
 
@@ -223,9 +223,7 @@ impl FromStr for Peer {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split(':').collect();
-        if parts.len() != 2 {
-            panic!("Invalid peer string: {}", s);
-        }
+        assert!(parts.len() == 2, "Invalid peer string: {s}");
 
         let ip = parts[0]
             .parse()

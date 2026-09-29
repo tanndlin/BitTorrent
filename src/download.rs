@@ -143,7 +143,7 @@ pub fn download_torrent(torrent: Torrent, no_seed: bool, cancel: &CancellationTo
                             tx,
                             &cancel,
                         ) {
-                            Ok(_) => {}
+                            Ok(()) => {}
                             Err(err) => match err {
                                 PeerProtocolError::FailedToConnect => {}
                                 _ => println!("{err}"),

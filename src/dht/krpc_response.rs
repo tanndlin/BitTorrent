@@ -19,6 +19,7 @@ pub struct KRPCResponsePing {
     pub node_id: [u8; 20],
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct KRPCResponseFindNode {
     pub transaction_id: [u8; 2],
@@ -26,6 +27,7 @@ pub struct KRPCResponseFindNode {
     nodes: Vec<DhtNode>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct KRPCResponseGetPeers {
     pub transaction_id: [u8; 2],
@@ -35,6 +37,7 @@ pub struct KRPCResponseGetPeers {
     token: Option<Vec<u8>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct KRPCError {
     pub transaction_id: [u8; 2],
@@ -55,9 +58,9 @@ impl TryFrom<&[u8]> for KRPCResponse {
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         let decoded = match decode::decode_dictionary(value, &mut 0)? {
-            Value::Dict(d) => d,
-            _ => panic!("Invalid KRPC response: expected dictionary"),
-        };
+            Value::Dict(d) => Ok(d),
+            _ => Err("Invalid KRPC response: expected dictionary".to_string()),
+        }?;
 
         if let Ok(err_response) = KRPCError::try_from(&decoded) {
             return Ok(err_response.into());
