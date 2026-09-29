@@ -43,7 +43,7 @@ pub fn parse_metainfo(content: &[u8]) -> Torrent {
                 if node_info.len() == 2 {
                     if let (Value::Str(host), Value::Number(port)) = (&node_info[0], &node_info[1])
                     {
-                        trackers.push(Tracker::Dht(format!("{}:{}", host, port)));
+                        trackers.push(Tracker::Dht(format!("{host}:{port}")));
                     }
                 }
             }
@@ -54,7 +54,7 @@ pub fn parse_metainfo(content: &[u8]) -> Torrent {
     // Print as a hex string
     println!(
         "Info hash: {:02x?}",
-        info_hash.map(|b| format!("{:02x}", b)).join("")
+        info_hash.map(|b| format!("{b:02x}")).join("")
     );
 
     Torrent {
@@ -290,7 +290,7 @@ fn get_bytes(content: &[u8], index: &mut usize) -> Result<Vec<u8>, String> {
 
 fn get_string(content: &[u8], index: &mut usize) -> Result<String, String> {
     let bytes = get_bytes(content, index)?;
-    String::from_utf8(bytes).map_err(|e| format!("Invalid UTF-8 string at index {}: {}", index, e))
+    String::from_utf8(bytes).map_err(|e| format!("Invalid UTF-8 string at index {index}: {e}"))
 }
 
 fn get_next_number(content: &[u8], index: &mut usize) -> i64 {
@@ -318,17 +318,17 @@ fn get_next_number(content: &[u8], index: &mut usize) -> i64 {
 #[allow(dead_code)]
 pub fn print_map(map: &HashMap<String, Value>) {
     for (key, value) in map {
-        print!("{}: ", key);
+        print!("{key}: ");
         match value {
             Value::Str(s) => println!("{s}"),
-            Value::Bytes(b) => println!("{:?}", b),
+            Value::Bytes(b) => println!("{b:?}"),
             Value::Number(n) => println!("{n}"),
             Value::Dict(d) => print_map(d),
             Value::Hashes(h) => print_hashes(h),
             Value::List(l) => print_list(l),
-            Value::Hash(h) => print!("{:?} ", h),
-            Value::Peers(p) => print!("{:?} ", p),
-        };
+            Value::Hash(h) => print!("{h:?} "),
+            Value::Peers(p) => print!("{p:?} "),
+        }
     }
 }
 
@@ -336,13 +336,13 @@ fn print_list(list: &[Value]) {
     for value in list {
         match value {
             Value::Str(s) => print!("{s} "),
-            Value::Bytes(b) => print!("{:?} ", b),
+            Value::Bytes(b) => print!("{b:?} "),
             Value::Number(n) => print!("{n} "),
             Value::Dict(d) => print_map(d),
             Value::Hashes(h) => print_hashes(h),
             Value::List(l) => print_list(l),
-            Value::Hash(h) => print!("{:?} ", h),
-            Value::Peers(p) => print!("{:?} ", p),
+            Value::Hash(h) => print!("{h:?} "),
+            Value::Peers(p) => print!("{p:?} "),
         }
     }
     println!();
@@ -350,7 +350,7 @@ fn print_list(list: &[Value]) {
 
 fn print_hashes(hashes: &[[u8; 20]]) {
     for hash in hashes {
-        print!("{:?} ", hash);
+        print!("{hash:?} ");
     }
 }
 

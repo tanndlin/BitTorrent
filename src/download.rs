@@ -149,7 +149,7 @@ pub fn download_torrent(
                             Ok(_) => {}
                             Err(err) => match err {
                                 PeerProtocolError::FailedToConnect => {}
-                                _ => println!("{}", err),
+                                _ => println!("{err}"),
                             },
                         }
 
@@ -229,7 +229,7 @@ fn get_peers_from_torrent(
                 Err(err) => {
                     // Only report the first failure, not every retry
                     if failed_trackers.insert(tracker.clone(), now).is_none() {
-                        println!("Error getting peers from tracker {}: {}", tracker, err);
+                        println!("Error getting peers from tracker {tracker}: {err}");
                     }
                     return vec![];
                 }
@@ -238,7 +238,7 @@ fn get_peers_from_torrent(
             // println!("Tracker Response: {:?}", response);
 
             if let Some(err) = response.failure {
-                println!("Tracker failure reason: {:?}", err);
+                println!("Tracker failure reason: {err:?}");
                 return vec![];
             }
 

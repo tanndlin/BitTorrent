@@ -76,8 +76,7 @@ impl TryFrom<&[u8]> for KRPCResponse {
         }
 
         Err(format!(
-            "Failed to parse KRPC response: no matching response type found. Decoded value: {:?}",
-            decoded
+            "Failed to parse KRPC response: no matching response type found. Decoded value: {decoded:?}"
         ))
     }
 }

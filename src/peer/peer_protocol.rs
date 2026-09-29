@@ -36,9 +36,9 @@ impl Display for PeerProtocolError {
         match self {
             PeerProtocolError::FailedToConnect => f.write_str("Failed to connect"),
             PeerProtocolError::ConnectionClosed => f.write_str("Connection closed"),
-            PeerProtocolError::HandshakeError(e) => f.write_str(&format!("Handshake error: {}", e)),
-            PeerProtocolError::ReceivedError(e) => f.write_str(&format!("Received error: {}", e)),
-            PeerProtocolError::Unknown(e) => f.write_str(&format!("Unknown error: {}", e)),
+            PeerProtocolError::HandshakeError(e) => f.write_str(&format!("Handshake error: {e}")),
+            PeerProtocolError::ReceivedError(e) => f.write_str(&format!("Received error: {e}")),
+            PeerProtocolError::Unknown(e) => f.write_str(&format!("Unknown error: {e}")),
         }
     }
 }
@@ -185,14 +185,12 @@ fn handle_handshake(
 
     peer_message_stream
         .write_all(&handshake_request)
-        .map_err(|e| {
-            PeerProtocolError::HandshakeError(format!("Failed to send handshake: {}", e))
-        })?;
+        .map_err(|e| PeerProtocolError::HandshakeError(format!("Failed to send handshake: {e}")))?;
     let mut response_buf = [0; 68];
     peer_message_stream
         .read_exact(&mut response_buf)
         .map_err(|e| {
-            PeerProtocolError::HandshakeError(format!("Failed to read handshake response: {}", e))
+            PeerProtocolError::HandshakeError(format!("Failed to read handshake response: {e}"))
         })?;
 
     let handshake =
@@ -329,18 +327,12 @@ fn handle_message(
                     Ok(None) => None,
                     Err(e) => {
                         piece_progress.reset();
-                        println!(
-                            "Error validating piece {}: {}, resetting progress",
-                            index, e
-                        );
+                        println!("Error validating piece {index}: {e}, resetting progress");
                         None
                     }
                 }
             } else {
-                println!(
-                    "Received piece data for index {} that is not in progress",
-                    index
-                );
+                println!("Received piece data for index {index} that is not in progress");
                 None
             };
 
@@ -360,8 +352,7 @@ fn handle_message(
             let begin = u32::from_be_bytes(message.payload[4..8].try_into().unwrap());
             let length = u32::from_be_bytes(message.payload[8..12].try_into().unwrap());
             println!(
-                "Peer canceled request for piece index: {}, begin: {}, length: {}",
-                index, begin, length
+                "Peer canceled request for piece index: {index}, begin: {begin}, length: {length}"
             );
         }
         PeerMessageID::Port => {

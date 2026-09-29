@@ -35,7 +35,7 @@ impl DhtClient {
             .filter_map(|tracker| match tracker.to_socket_addrs() {
                 Ok(addrs) => Some(addrs),
                 Err(err) => {
-                    println!("Failed to resolve DHT bootstrap node {}: {}", tracker, err);
+                    println!("Failed to resolve DHT bootstrap node {tracker}: {err}");
                     None
                 }
             })
@@ -142,7 +142,7 @@ impl DhtClient {
         let addr = node.location;
         self.socket
             .send_to(&encoded, addr)
-            .map_err(|e| format!("Failed to send get_peers to {}: {}", addr, e))?;
+            .map_err(|e| format!("Failed to send get_peers to {addr}: {e}"))?;
 
         Ok(req)
     }
@@ -155,19 +155,18 @@ impl DhtClient {
         let addr = node.location;
         self.socket
             .send_to(&encoded, addr)
-            .map_err(|e| format!("Failed to send ping to {}: {}", addr, e))?;
+            .map_err(|e| format!("Failed to send ping to {addr}: {e}"))?;
 
         if let Some(res) = self.recv_response() {
-            println!("Received response from {}: {:?}", addr, res);
+            println!("Received response from {addr}: {res:?}");
             match res {
                 KRPCResponse::Ping(_) => Ok(()),
                 _ => Err(format!(
-                    "Expected ping response from {}, but got: {:?}",
-                    addr, res
+                    "Expected ping response from {addr}, but got: {res:?}"
                 )),
             }
         } else {
-            Err(format!("No response received from {}", addr))
+            Err(format!("No response received from {addr}"))
         }
     }
 
@@ -178,8 +177,7 @@ impl DhtClient {
                 Ok((size, src)) => match KRPCResponse::try_from(&buf[..size]) {
                     Ok(res) => return Some(res),
                     Err(err) => {
-                        println!("Failed to parse from {}: {}", src, err);
-                        continue; // skip garbage, keep waiting
+                        println!("Failed to parse from {src}: {err}");
                     }
                 },
                 Err(_) => return None, // timeout = genuinely no response

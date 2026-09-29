@@ -383,8 +383,7 @@ pub fn check_tracker(url: &str) -> Result<bool, String> {
 fn check_udp_tracker(url: &str) -> Result<bool, String> {
     // 1. Bind the UdpSocket to a local address.
     //    "0.0.0.0:0" allows the OS to choose an available port.
-    let socket =
-        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind socket: {}", e))?;
+    let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind socket: {e}"))?;
 
     // 2. Define the target URL (hostname and port).
     let target_url = url.trim_start_matches("udp://"); // Replace with your target URL and port
@@ -393,7 +392,7 @@ fn check_udp_tracker(url: &str) -> Result<bool, String> {
     // 3. Resolve the target URL to a SocketAddr.
     let remote_addr = target_url
         .to_socket_addrs()
-        .map_err(|e| format!("Failed to resolve address: {}", e))?
+        .map_err(|e| format!("Failed to resolve address: {e}"))?
         .next()
         .ok_or_else(|| "Could not resolve address".to_string())?;
 
@@ -403,18 +402,18 @@ fn check_udp_tracker(url: &str) -> Result<bool, String> {
     // 5. Send the datagram.
     socket
         .send_to(data, remote_addr)
-        .map_err(|e| format!("Failed to send data: {}", e))?;
+        .map_err(|e| format!("Failed to send data: {e}"))?;
 
-    println!("UDP datagram sent to {}", remote_addr);
+    println!("UDP datagram sent to {remote_addr}");
 
     // Receive a response with a timeout
     let mut buf = [0; 1024];
     socket
         .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-        .map_err(|e| format!("Failed to set read timeout: {}", e))?;
+        .map_err(|e| format!("Failed to set read timeout: {e}"))?;
     let res = socket
         .recv_from(&mut buf)
-        .map_err(|e| format!("Failed to receive data: {}", e));
+        .map_err(|e| format!("Failed to receive data: {e}"));
     match res {
         Ok((amt, src)) => {
             println!("Received {} bytes from {}: {:?}", amt, src, &buf[..amt]);
