@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     fmt::Display,
     net::{IpAddr, Ipv4Addr, ToSocketAddrs, UdpSocket},
+    str::FromStr,
 };
 
 use crate::bencoding::decode::{decode_dictionary, Value};
@@ -218,8 +219,9 @@ impl std::fmt::Display for Peer {
     }
 }
 
-impl From<String> for Peer {
-    fn from(s: String) -> Self {
+impl FromStr for Peer {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split(':').collect();
         if parts.len() != 2 {
             panic!("Invalid peer string: {}", s);
@@ -227,11 +229,11 @@ impl From<String> for Peer {
 
         let ip = parts[0]
             .parse()
-            .unwrap_or_else(|_| panic!("Invalid IP address: {}", parts[0]));
+            .map_err(|_| format!("Invalid IP address: {}", parts[0]))?;
         let port = parts[1]
             .parse()
-            .unwrap_or_else(|_| panic!("Invalid port: {}", parts[1]));
-        Peer { ip, port }
+            .map_err(|_| format!("Invalid port: {}", parts[1]))?;
+        Ok(Peer { ip, port })
     }
 }
 
