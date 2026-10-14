@@ -1,7 +1,9 @@
 use crate::bencoding::{decode::Value, encode};
+use derive_more::From;
 use rand::RngExt;
 use std::collections::HashMap;
 
+#[derive(From)]
 pub enum KRPCRequest {
     Ping(KRPCRequestPing),
     FindNode(KRPCRequestFindNode),
@@ -135,22 +137,4 @@ fn get_transaction_dict(transaction_id: [u8; 2]) -> HashMap<String, Value> {
     let mut dict = HashMap::new();
     dict.insert("t".to_string(), Value::Bytes(transaction_id.to_vec()));
     dict
-}
-
-impl From<KRPCRequestPing> for KRPCRequest {
-    fn from(ping: KRPCRequestPing) -> Self {
-        KRPCRequest::Ping(ping)
-    }
-}
-
-impl From<KRPCRequestFindNode> for KRPCRequest {
-    fn from(find_node: KRPCRequestFindNode) -> Self {
-        KRPCRequest::FindNode(find_node)
-    }
-}
-
-impl From<KRPCRequestGetPeers> for KRPCRequest {
-    fn from(get_peers: KRPCRequestGetPeers) -> Self {
-        KRPCRequest::GetPeers(get_peers)
-    }
 }

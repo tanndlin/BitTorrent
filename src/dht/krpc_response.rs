@@ -1,3 +1,5 @@
+use derive_more::From;
+
 use super::super::bencoding::decode;
 use crate::{bencoding::decode::Value, connection::Peer, dht::dht_node::DhtNode};
 use std::{
@@ -5,7 +7,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
 };
 
-#[derive(Debug)]
+#[derive(Debug, From)]
 pub enum KRPCResponse {
     Ping(KRPCResponsePing),
     FindNode(KRPCResponseFindNode),
@@ -303,29 +305,5 @@ impl TryFrom<&HashMap<String, Value>> for KRPCError {
             error_code,
             error_message,
         })
-    }
-}
-
-impl From<KRPCResponsePing> for KRPCResponse {
-    fn from(ping: KRPCResponsePing) -> Self {
-        KRPCResponse::Ping(ping)
-    }
-}
-
-impl From<KRPCResponseFindNode> for KRPCResponse {
-    fn from(find_node: KRPCResponseFindNode) -> Self {
-        KRPCResponse::FindNode(find_node)
-    }
-}
-
-impl From<KRPCResponseGetPeers> for KRPCResponse {
-    fn from(get_peers: KRPCResponseGetPeers) -> Self {
-        KRPCResponse::GetPeers(get_peers)
-    }
-}
-
-impl From<KRPCError> for KRPCResponse {
-    fn from(error: KRPCError) -> Self {
-        KRPCResponse::KRPCError(error)
     }
 }
